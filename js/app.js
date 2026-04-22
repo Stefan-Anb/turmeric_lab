@@ -1845,3 +1845,24 @@ function initResizer(sidebarId,resizerId,isLeft){
 }
 initResizer('sidebar','sidebar-resizer',false);
 initResizer('propspanel','propspanel-resizer',true);
+
+function showNetlist(){
+  var netlist=generateNetlist();
+  var modal=document.getElementById('netlist-modal');
+  var textArea=document.getElementById('netlist-text');
+  textArea.value=netlist;
+  textArea.rows=Math.max(10,netlist.split('\n').length+2);
+  modal.style.display='flex';
+  modal.onclick=function(e){if(e.target===modal)closeNetlist();};
+}
+
+function closeNetlist(){
+  document.getElementById('netlist-modal').style.display='none';
+}
+
+function copyNetlist(){
+  var textArea=document.getElementById('netlist-text');
+  textArea.select();
+  document.execCommand('copy');
+  hint('Netlist copied to clipboard');
+}

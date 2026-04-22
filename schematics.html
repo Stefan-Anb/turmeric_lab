@@ -25,6 +25,7 @@
   <button class="tb-btn" onclick="showCustomCompPanel()">CUSTOM</button>
   <button class="tb-btn" onclick="exportSVG()">SAVE</button>
   <button class="tb-btn" onclick="importSVG()">LOAD</button>
+  <button class="tb-btn" onclick="showNetlist()">NETLIST</button>
   <button class="tb-btn" onclick="zoomToFit()">
     <svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 4V1h3M8 1h3v3M11 8v3H8M4 11H1V8" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>ZOOM FIT
   </button>
@@ -152,8 +153,17 @@
   <div class="sb-item" id="sb-hint">Select a component or press W for wire</div>
 </div>
 
+<div id="netlist-modal" class="modal" style="display:none">
+  <div class="modal-content">
+    <div class="modal-header">SPICE Netlist<button class="modal-close" onclick="closeNetlist()">&times;</button></div>
+    <textarea id="netlist-text" readonly></textarea>
+    <button class="tb-btn" onclick="copyNetlist()">Copy to Clipboard</button>
+  </div>
+</div>
+
 <script src="js/components.js"></script>
 <script src="js/schematic.js"></script>
+<script src="js/netlist.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

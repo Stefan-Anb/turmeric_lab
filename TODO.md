@@ -2,7 +2,7 @@
 [x] Mehrfachselektion und Verschieben / Copy+Paste
 - Historie (Ctrl+Z / Ctrl+Y) -> Bugfixing needed
 - Spice Modelle in Bauteile hinterlegen
-- Custom IC
+[x] Custom IC
 - Diverse neue Bauteile erzeugen
 - Spice Directives
 - Netliste erzeugen
