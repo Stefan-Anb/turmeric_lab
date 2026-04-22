@@ -183,10 +183,6 @@ function renderComps(){
           var pin=def.pins[i];
           console.log('PROBE PIN: Component='+comp.type+' ('+(comp.label||comp.id)+'), Pin='+pin.n);
           hint('Probed: '+comp.type+'.'+pin.n);
-        } else if(S.mode==='wire'){
-          var netName=getNetName(absX,absY);
-          console.log('NET AT PIN: '+netName);
-          hint('Net at pin: '+netName);
         } else if(S.wire.drawing){handleWireClick({x:absX,y:absY});}
         else{startWireFromPin(absX,absY,{type:'pin',compId:comp.id,pinIdx:i});}
       };})(comp,tp.x,tp.y,i));
@@ -221,23 +217,7 @@ function renderWires(){
         ring.addEventListener('mouseleave',function(){ this.style.opacity='0'; });
         ring.addEventListener('mousedown',(function(epx,epy){return function(ev){
           ev.stopPropagation();ev.preventDefault();
-          if(S.mode==='probe'){
-            var j=juncAt(epx,epy);
-            if(j){
-              for(var i=0;i<j.wires.length;i++){
-                var jw=S.wires.find(function(ww){return ww.id===j.wires[i];});
-                if(jw&&jw.net){console.log('PROBE NET (wire-end at junction): '+jw.net);hint('Probed net: '+jw.net);return;}
-              }
-              console.log('PROBE NET: (wire-end at junction, unnamed)');hint('Probed: wire-end at junction');
-            } else {
-              var wseg=findWireSeg(epx,epy,10);
-              if(wseg){
-                var w=S.wires.find(function(wi){return wi.id===wseg.wireId;});
-                if(w&&w.net){console.log('PROBE NET: '+w.net);hint('Probed net: '+w.net);}
-                else{console.log('PROBE NET: (unnamed)');hint('Probed: wire-end');}
-              }
-            }
-          } else if(S.wire.drawing){handleWireClick({x:epx,y:epy});}
+          if(S.wire.drawing){handleWireClick({x:epx,y:epy});}
           else{startWireFromPin(epx,epy,null);}
         };})(ep.x,ep.y));
       }
@@ -482,18 +462,6 @@ function clearAllProbeHighlights(){
 }
 
 function getNetNameAt(x,y){
-  var wseg=findWireSeg(x,y,10);
-  if(wseg){
-    var w=S.wires.find(function(wi){return wi.id===wseg.wireId;});
-    if(w){
-      var netIds=getNetWires(w.id);
-      for(var i=0;i<netIds.length;i++){
-        var nw=S.wires.find(function(nwi){return nwi.id===netIds[i];});
-        if(nw&&nw.net)return nw.net;
-      }
-      return'N_'+Math.round(x/GRID)+'_'+Math.round(y/GRID);
-    }
-  }
   var near=findPin(x,y,18);
   if(near&&near.type==='pin'){
     var comp=S.components.find(function(c){return c.id===near.compId;});
@@ -503,23 +471,7 @@ function getNetNameAt(x,y){
       return{comp:comp,pin:pin,compName:comp.type,pinName:pin.n};
     }
   }
-  var j=juncAt(x,y);
-  if(j){
-    for(var i=0;i<j.wires.length;i++){
-      var jw=S.wires.find(function(ww){return ww.id===j.wires[i];});
-      if(jw&&jw.net)return jw.net;
-    }
-  }
-  for(var ci=0;ci<S.components.length;ci++){
-    var c=S.components[ci];
-    if(c.type==='gnd'||c.type==='vcc'||c.type==='netconn'){
-      var tp=xfPin(CD[c.type].pins[0].x,CD[c.type].pins[0].y,c.rot||0,c.mirror||false);
-      if(c.x+tp.x===x&&c.y+tp.y===y){
-        return c.type==='gnd'?'0':(c.label||c.value);
-      }
-    }
-  }
-  return null;
+  return getNetNameWithTempNames(x,y);
 }
 
 function handleProbeClick(pt){

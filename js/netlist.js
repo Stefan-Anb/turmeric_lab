@@ -23,18 +23,135 @@ function getNetName(x,y){
       }
     }
   }
-  var cnt=0;
+  var wseg=findWireSeg(x,y,10);
+  if(wseg){
+    var w=S.wires.find(function(wi){return wi.id===wseg.wireId;});
+    if(w&&w.net)return w.net;
+  }
+  return null;
+}
+
+function getNetNameWithTempNames(x,y){
+  var explicitNet=getNetName(x,y);
+  if(explicitNet)return explicitNet;
+  
+  for(var ci=0;ci<S.components.length;ci++){
+    var c=S.components[ci];
+    if(c.type==='gnd'||c.type==='vcc'||c.type==='netconn'||c.type==='source'){
+      var def=CD[c.type];
+      for(var pi=0;pi<def.pins.length;pi++){
+        var tp=xfPin(def.pins[pi].x,def.pins[pi].y,c.rot||0,c.mirror||false);
+        if(c.x+tp.x===x&&c.y+tp.y===y){
+          if(c.type==='gnd')return'0';
+          if(c.type==='vcc')return c.label||c.value||'VCC';
+          if(c.type==='netconn')return c.label||'NET';
+          if(c.type==='source'){
+            var netName=getNetName(x,y);
+            if(netName)return netName;
+            return getTempNetNameFromPin(c.id,pi);
+          }
+        }
+      }
+    }
+  }
+  
+  var wseg=findWireSeg(x,y,10);
+  if(wseg){
+    return getTempNetName(wseg.wireId);
+  }
+  var j=juncAt(x,y);
+  if(j&&j.wires.length>0){
+    return getTempNetName(j.wires[0]);
+  }
   for(var wi=0;wi<S.wires.length;wi++){
     var w=S.wires[wi];
     if(!w.points||w.points.length<2)continue;
     var f=w.points[0],l=w.points[w.points.length-1];
-    if((f.x===x&&f.y===y)||(l.x===x&&l.y===y))cnt++;
+    if((f.x===x&&f.y===y)||(l.x===x&&l.y===y)){
+      return getTempNetName(w.id);
+    }
   }
-  if(cnt>0)return'N_'+Math.round(x/GRID)+'_'+Math.round(y/GRID);
-  return'0';
+  return'n000';
+}
+
+function getTempNetNameFromPin(compId,pinIdx){
+  var comp=S.components.find(function(c){return c.id===compId;});
+  if(!comp)return null;
+  var def=CD[comp.type];
+  var pin=def.pins[pinIdx];
+  var tp=xfPin(pin.x,pin.y,comp.rot||0,comp.mirror||false);
+  var px=comp.x+tp.x,py=comp.y+tp.y;
+  var wseg=findWireSeg(px,py,10);
+  if(wseg)return getTempNetName(wseg.wireId);
+  var j=juncAt(px,py);
+  if(j&&j.wires.length>0)return getTempNetName(j.wires[0]);
+  for(var wi=0;wi<S.wires.length;wi++){
+    var w=S.wires[wi];
+    if(!w.points||w.points.length<2)continue;
+    var f=w.points[0],l=w.points[w.points.length-1];
+    if((f.x===px&&f.y===py)||(l.x===px&&l.y===py)){
+      return getTempNetName(w.id);
+    }
+  }
+  return null;
+}
+
+var tempNetNamesGen={};
+var tempNetCounterGen=0;
+function getTempNetName(wireId){
+  if(!tempNetNamesGen||Object.keys(tempNetNamesGen).length===0){
+    tempNetNamesGen={};
+    tempNetCounterGen=1;
+    var processedWires={};
+    for(var wi=0;wi<S.wires.length;wi++){
+      var w=S.wires[wi];
+      if(processedWires[w.id])continue;
+      var netIds=getNetWires(w.id);
+      var netName=null;
+      for(var ni=0;ni<netIds.length;ni++){
+        var nw=S.wires.find(function(nwi){return nwi.id===netIds[ni];});
+        if(nw&&nw.net){netName=nw.net;break;}
+      }
+      if(!netName){
+        var hasGnd=false;
+        for(var ni=0;ni<netIds.length;ni++){
+          var nw=S.wires.find(function(nwi){return nwi.id===netIds[ni];});
+          if(!nw)continue;
+          var eps=[nw.points[0],nw.points[nw.points.length-1]];
+          for(var ei=0;ei<eps.length;ei++){
+            for(var ci=0;ci<S.components.length;ci++){
+              var c=S.components[ci];
+              if(c.type!=='gnd')continue;
+              var tp=xfPin(CD.gnd.pins[0].x,CD.gnd.pins[0].y,c.rot||0,c.mirror||false);
+              if(c.x+tp.x===eps[ei].x&&c.y+tp.y===eps[ei].y){hasGnd=true;break;}
+            }
+            if(hasGnd)break;
+          }
+          if(hasGnd)break;
+        }
+        if(hasGnd){
+          netName='0';
+        } else {
+          netName='n'+String(tempNetCounterGen).padStart(3,'0');
+          tempNetCounterGen++;
+        }
+      }
+      for(var nij=0;nij<netIds.length;nij++){
+        processedWires[netIds[nij]]=true;
+      }
+      var netKey=netIds.slice().sort().join(',');
+      tempNetNamesGen[netKey]=netName;
+    }
+  }
+  var netIds=getNetWires(wireId);
+  var netKey=netIds.slice().sort().join(',');
+  return tempNetNamesGen[netKey]||'n000';
 }
 
 function generateNetlist(){
+  tempNetNamesGen={};
+  tempNetCounterGen=0;
+  getTempNetName(S.wires.length>0?S.wires[0].id:null);
   var lines=[];
   var subcircuits=[];
   var passive=['resistor','capacitor','inductor'];
@@ -57,7 +174,7 @@ function generateNetlist(){
       var ref='V'+counts.vcc;
       var tp=xfPin(def.pins[0].x,def.pins[0].y,c.rot||0,c.mirror||false);
       var px=c.x+tp.x,py=c.y+tp.y;
-      var netName=getNetName(px,py);
+      var netName=getNetNameWithTempNames(px,py);
       var voltage=c.value||def.val||'5V';
       var line=ref+' '+netName+' 0 DC '+voltage;
       lines.push(line);
@@ -113,7 +230,7 @@ function generateNetlist(){
       for(var pi=0;pi<def.pins.length;pi++){
         var tp=xfPin(def.pins[pi].x,def.pins[pi].y,c.rot||0,c.mirror||false);
         var px=c.x+tp.x,py=c.y+tp.y;
-        var netName=getNetName(px,py);
+        var netName=getNetNameWithTempNames(px,py);
         nets.push(netName);
       }
       var line='S'+ref+' '+nets[0]+' '+nets[1]+' '+nets[3]+' '+nets[2]+' '+model;
@@ -127,7 +244,7 @@ function generateNetlist(){
       for(var pi=0;pi<def.pins.length;pi++){
         var tp=xfPin(def.pins[pi].x,def.pins[pi].y,c.rot||0,c.mirror||false);
         var px=c.x+tp.x,py=c.y+tp.y;
-        var netName=getNetName(px,py);
+        var netName=getNetNameWithTempNames(px,py);
         nets.push(netName);
       }
       var line='Q'+ref+' '+nets[1]+' '+nets[0]+' '+nets[2]+' '+model;
@@ -141,7 +258,7 @@ function generateNetlist(){
       for(var pi=0;pi<def.pins.length;pi++){
         var tp=xfPin(def.pins[pi].x,def.pins[pi].y,c.rot||0,c.mirror||false);
         var px=c.x+tp.x,py=c.y+tp.y;
-        var netName=getNetName(px,py);
+        var netName=getNetNameWithTempNames(px,py);
         nets.push(netName);
       }
       var line='M'+ref+' '+nets[1]+' '+nets[0]+' '+nets[2]+' '+model;
@@ -155,7 +272,7 @@ function generateNetlist(){
       for(var pi=0;pi<def.pins.length;pi++){
         var tp=xfPin(def.pins[pi].x,def.pins[pi].y,c.rot||0,c.mirror||false);
         var px=c.x+tp.x,py=c.y+tp.y;
-        var netName=getNetName(px,py);
+        var netName=getNetNameWithTempNames(px,py);
         nets.push(netName);
       }
       var line='D'+ref+' '+nets[0]+' '+nets[1]+' '+model;
@@ -169,7 +286,7 @@ function generateNetlist(){
       for(var pi=0;pi<def.pins.length;pi++){
         var tp=xfPin(def.pins[pi].x,def.pins[pi].y,c.rot||0,c.mirror||false);
         var px=c.x+tp.x,py=c.y+tp.y;
-        var netName=getNetName(px,py);
+        var netName=getNetNameWithTempNames(px,py);
         nets.push(netName);
       }
       var line='X'+ref+' '+nets.join(' ')+' '+subname;
@@ -182,7 +299,7 @@ function generateNetlist(){
     for(var pi=0;pi<def.pins.length;pi++){
       var tp=xfPin(def.pins[pi].x,def.pins[pi].y,c.rot||0,c.mirror||false);
       var px=c.x+tp.x,py=c.y+tp.y;
-      var netName=getNetName(px,py);
+      var netName=getNetNameWithTempNames(px,py);
       nets.push(netName);
     }
     var val=c.value||def.val;
