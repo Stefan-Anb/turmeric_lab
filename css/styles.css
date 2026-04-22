@@ -81,6 +81,9 @@ body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);displ
 .wire-preview{stroke:var(--accent);stroke-width:1.5;fill:none;stroke-linecap:square;stroke-dasharray:5 3;opacity:.7;pointer-events:none;}
 .snap-ring{fill:none;stroke:var(--accent);stroke-width:1.5;opacity:.9;pointer-events:none;}
 .pin-ring{fill:#00c8ff18;stroke:var(--accent);stroke-width:1.5;pointer-events:none;}
+.probe-highlight{fill:#ff904018;stroke:#ff9040;stroke-width:2;pointer-events:none;}
+.probe-highlight.pin{fill:#00c8ff30;stroke:#00c8ff;stroke-width:2.5;}
+.probe-drag-line{stroke:#ff9040;stroke-width:2.5;stroke-dasharray:6 3;pointer-events:none;}
 .ghost{opacity:.35;pointer-events:none;}
 .wire-net-lbl{fill:var(--accent);font-family:'Share Tech Mono',monospace;font-size:18px;pointer-events:none;}
 

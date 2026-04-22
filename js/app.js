@@ -178,7 +178,16 @@ function renderComps(){
       r.addEventListener('mousedown',(function(comp,tpx,tpy,i){return function(ev){
         ev.stopPropagation(); ev.preventDefault();
         var absX=comp.x+tpx,absY=comp.y+tpy;
-        if(S.wire.drawing){handleWireClick({x:absX,y:absY});}
+        if(S.mode==='probe'){
+          var def=CD[comp.type];
+          var pin=def.pins[i];
+          console.log('PROBE PIN: Component='+comp.type+' ('+(comp.label||comp.id)+'), Pin='+pin.n);
+          hint('Probed: '+comp.type+'.'+pin.n);
+        } else if(S.mode==='wire'){
+          var netName=getNetName(absX,absY);
+          console.log('NET AT PIN: '+netName);
+          hint('Net at pin: '+netName);
+        } else if(S.wire.drawing){handleWireClick({x:absX,y:absY});}
         else{startWireFromPin(absX,absY,{type:'pin',compId:comp.id,pinIdx:i});}
       };})(comp,tp.x,tp.y,i));
     }
@@ -212,7 +221,23 @@ function renderWires(){
         ring.addEventListener('mouseleave',function(){ this.style.opacity='0'; });
         ring.addEventListener('mousedown',(function(epx,epy){return function(ev){
           ev.stopPropagation();ev.preventDefault();
-          if(S.wire.drawing){handleWireClick({x:epx,y:epy});}
+          if(S.mode==='probe'){
+            var j=juncAt(epx,epy);
+            if(j){
+              for(var i=0;i<j.wires.length;i++){
+                var jw=S.wires.find(function(ww){return ww.id===j.wires[i];});
+                if(jw&&jw.net){console.log('PROBE NET (wire-end at junction): '+jw.net);hint('Probed net: '+jw.net);return;}
+              }
+              console.log('PROBE NET: (wire-end at junction, unnamed)');hint('Probed: wire-end at junction');
+            } else {
+              var wseg=findWireSeg(epx,epy,10);
+              if(wseg){
+                var w=S.wires.find(function(wi){return wi.id===wseg.wireId;});
+                if(w&&w.net){console.log('PROBE NET: '+w.net);hint('Probed net: '+w.net);}
+                else{console.log('PROBE NET: (unnamed)');hint('Probed: wire-end');}
+              }
+            }
+          } else if(S.wire.drawing){handleWireClick({x:epx,y:epy});}
           else{startWireFromPin(epx,epy,null);}
         };})(ep.x,ep.y));
       }
@@ -351,14 +376,15 @@ function setMode(m){
   S.mode=m;
   if(m!=='place'){S.placeType=null;clearGhost();}
   if(m!=='wire'){cancelWire();}
+  if(m!=='probe'){clearAllProbeHighlights();}
   document.querySelectorAll('.tb-btn').forEach(function(b){b.classList.remove('active');});
   var btn=document.getElementById('btn-'+m);
   if(btn)btn.classList.add('active');
   document.getElementById('mode-label').textContent=m.toUpperCase();
-  svg.style.cursor=m==='wire'||m==='place'?'crosshair':'default';
+  svg.style.cursor=m==='wire'||m==='place'?'crosshair':(m==='probe'?'crosshair':'default');
   if(m!=='place')document.querySelectorAll('.comp-btn').forEach(function(b){b.classList.remove('selected');});
   hint(m==='wire'?'Click to start wire \u2014 click again or pin to finish':m==='place'?'Click to place':
-    'Click to select \u00b7 drag to move \u00b7 hover pin to start wire');
+    m==='probe'?'Click to probe net or pin \u2014 drag to probe two points':m==='select'?'Click to select \u00b7 drag to move \u00b7 hover pin to start wire':'Click to select \u00b7 drag to move \u00b7 hover pin to start wire');
 }
 
 function selectComp(type){
@@ -423,6 +449,214 @@ var pinRingEl=null;
 function showPinRing(x,y){clearPinRing();pinRingEl=CE(lyrO,x,y,9,'pin-ring');pinRingEl.style.opacity='1';}
 function clearPinRing(){if(pinRingEl){pinRingEl.remove();pinRingEl=null;}}
 
+// ═══ PROBE MODE ═══
+var probeHighlightEl=null;
+var probeState={active:false,startX:null,startY:null,startNetName:null,startIsPin:null,dragging:false};
+var probeStartHighlightEl=null;
+var probeDragLineEl=null;
+
+function showProbeHighlight(x,y,isPin){
+  clearProbeHighlight();
+  probeHighlightEl=CE(lyrO,x,y,isPin?9:12,'probe-highlight'+(isPin?' pin':''));
+  probeHighlightEl.style.opacity='1';
+}
+
+function showProbeStartHighlight(x,y,isPin){
+  clearProbeStartHighlight();
+  probeStartHighlightEl=CE(lyrO,x,y,isPin?9:12,'probe-highlight'+(isPin?' pin':''));
+  probeStartHighlightEl.style.opacity='1';
+}
+
+function clearProbeHighlight(){
+  if(probeHighlightEl){probeHighlightEl.remove();probeHighlightEl=null;}
+}
+
+function clearProbeStartHighlight(){
+  if(probeStartHighlightEl){probeStartHighlightEl.remove();probeStartHighlightEl=null;}
+}
+
+function clearAllProbeHighlights(){
+  clearProbeHighlight();
+  clearProbeStartHighlight();
+  if(probeDragLineEl){probeDragLineEl.remove();probeDragLineEl=null;}
+}
+
+function getNetNameAt(x,y){
+  var wseg=findWireSeg(x,y,10);
+  if(wseg){
+    var w=S.wires.find(function(wi){return wi.id===wseg.wireId;});
+    if(w){
+      var netIds=getNetWires(w.id);
+      for(var i=0;i<netIds.length;i++){
+        var nw=S.wires.find(function(nwi){return nwi.id===netIds[i];});
+        if(nw&&nw.net)return nw.net;
+      }
+      return'N_'+Math.round(x/GRID)+'_'+Math.round(y/GRID);
+    }
+  }
+  var near=findPin(x,y,18);
+  if(near&&near.type==='pin'){
+    var comp=S.components.find(function(c){return c.id===near.compId;});
+    if(comp){
+      var def=CD[comp.type];
+      var pin=def.pins[near.pinIdx];
+      return{comp:comp,pin:pin,compName:comp.type,pinName:pin.n};
+    }
+  }
+  var j=juncAt(x,y);
+  if(j){
+    for(var i=0;i<j.wires.length;i++){
+      var jw=S.wires.find(function(ww){return ww.id===j.wires[i];});
+      if(jw&&jw.net)return jw.net;
+    }
+  }
+  for(var ci=0;ci<S.components.length;ci++){
+    var c=S.components[ci];
+    if(c.type==='gnd'||c.type==='vcc'||c.type==='netconn'){
+      var tp=xfPin(CD[c.type].pins[0].x,CD[c.type].pins[0].y,c.rot||0,c.mirror||false);
+      if(c.x+tp.x===x&&c.y+tp.y===y){
+        return c.type==='gnd'?'0':(c.label||c.value);
+      }
+    }
+  }
+  return null;
+}
+
+function handleProbeClick(pt){
+  var near=findPin(pt.x,pt.y,18);
+  if(near&&near.type==='pin'){
+    var comp=S.components.find(function(c){return c.id===near.compId;});
+    if(comp){
+      var def=CD[comp.type];
+      var pin=def.pins[near.pinIdx];
+      console.log('PROBE PIN: Component='+comp.type+' ('+(comp.label||comp.id)+'), Pin='+pin.n);
+      hint('Probed: '+comp.type+'.'+pin.n);
+    }
+    return;
+  }
+  var wseg=findWireSeg(pt.x,pt.y,10);
+  if(wseg){
+    var w=S.wires.find(function(wi){return wi.id===wseg.wireId;});
+    if(w){
+      var netIds=getNetWires(w.id);
+      var netName=null;
+      for(var i=0;i<netIds.length;i++){
+        var nw=S.wires.find(function(nwi){return nwi.id===netIds[i];});
+        if(nw&&nw.net){netName=nw.net;break;}
+      }
+      if(!netName){
+        netName='N_'+Math.round(pt.x/GRID)+'_'+Math.round(pt.y/GRID);
+      }
+      console.log('PROBE NET: '+netName);
+      hint('Probed net: '+netName);
+      return;
+    }
+  }
+  var j=juncAt(pt.x,pt.y);
+  if(j){
+    for(var i=0;i<j.wires.length;i++){
+      var jw=S.wires.find(function(ww){return ww.id===j.wires[i];});
+      if(jw&&jw.net){
+        console.log('PROBE NET (junction): '+jw.net);
+        hint('Probed net: '+jw.net);
+        return;
+      }
+    }
+    console.log('PROBE NET: (junction, unnamed)');
+    hint('Probed junction (unnamed net)');
+    return;
+  }
+}
+
+function startProbeDrag(e,pt){
+  clearProbeStartHighlight();
+  clearProbeHighlight();
+  
+  var near=findPin(pt.x,pt.y,18);
+  var isPin=(near&&near.type==='pin');
+  var netName=getNetNameAt(pt.x,pt.y);
+  var hasNet=isPin||!!netName;
+  
+  if(!hasNet){
+    return;
+  }
+  
+  probeState.active=true;
+  probeState.startX=pt.x;
+  probeState.startY=pt.y;
+  probeState.startNetName=netName;
+  probeState.startIsPin=isPin;
+  probeState.dragging=true;
+  
+  showProbeStartHighlight(pt.x,pt.y,isPin);
+  
+  probeDragLineEl=el('line',{x1:pt.x,y1:pt.y,x2:pt.x,y2:pt.y,class:'probe-drag-line'});
+  lyrO.appendChild(probeDragLineEl);
+}
+
+function updateProbeDrag(pt){
+  if(!probeDragLineEl)return;
+  probeDragLineEl.setAttribute('x2',pt.x);
+  probeDragLineEl.setAttribute('y2',pt.y);
+}
+
+function endProbeDrag(pt){
+  if(!probeState.dragging)return;
+  
+  if(probeDragLineEl){probeDragLineEl.remove();probeDragLineEl=null;}
+  clearProbeStartHighlight();
+  clearProbeHighlight();
+  
+  var startNetName=probeState.startNetName;
+  var startIsPin=probeState.startIsPin;
+  var endNear=findPin(pt.x,pt.y,18);
+  var endIsPin=(endNear&&endNear.type==='pin');
+  var endNetName=getNetNameAt(pt.x,pt.y);
+  
+  if(startIsPin&&endIsPin){
+    var startNear=findPin(probeState.startX,probeState.startY,18);
+    var startComp=S.components.find(function(c){return c.id===startNear.compId;});
+    var endComp=S.components.find(function(c){return c.id===endNear.compId;});
+    if(startComp&&endComp){
+      var startDef=CD[startComp.type];
+      var endDef=CD[endComp.type];
+      var startPin=startDef.pins[startNear.pinIdx];
+      var endPin=endDef.pins[endNear.pinIdx];
+      console.log('PROBE: '+startComp.type+'.'+startPin.n+' -> '+endComp.type+'.'+endPin.n);
+      hint('Probed: '+startComp.type+'.'+startPin.n+' -> '+endComp.type+'.'+endPin.n);
+    }
+  } else if(startIsPin&&!endIsPin){
+    var startNear=findPin(probeState.startX,probeState.startY,18);
+    var startComp=S.components.find(function(c){return c.id===startNear.compId;});
+    var startDef=CD[startComp.type];
+    var startPin=startDef.pins[startNear.pinIdx];
+    if(endNetName&&typeof endNetName==='object'&&endNetName.comp){
+      console.log('PROBE: '+startComp.type+'.'+startPin.n+' -> '+endNetName.compName+'.'+endNetName.pinName);
+      hint('Probed: '+startComp.type+'.'+startPin.n+' -> '+endNetName.compName+'.'+endNetName.pinName);
+    } else {
+      console.log('PROBE: '+startComp.type+'.'+startPin.n+' -> '+(endNetName||'NOTHING'));
+      hint('Probed: '+startComp.type+'.'+startPin.n+' -> '+(endNetName||'NOTHING'));
+    }
+  } else if(!startIsPin&&endIsPin){
+    var endComp=S.components.find(function(c){return c.id===endNear.compId;});
+    var endDef=CD[endComp.type];
+    var endPin=endDef.pins[endNear.pinIdx];
+    if(startNetName&&typeof startNetName==='object'&&startNetName.comp){
+      console.log('PROBE: '+startNetName.compName+'.'+startNetName.pinName+' -> '+endComp.type+'.'+endPin.n);
+      hint('Probed: '+startNetName.compName+'.'+startNetName.pinName+' -> '+endComp.type+'.'+endPin.n);
+    } else {
+      console.log('PROBE: '+(startNetName||'NOTHING')+' -> '+endComp.type+'.'+endPin.n);
+      hint('Probed: '+(startNetName||'NOTHING')+' -> '+endComp.type+'.'+endPin.n);
+    }
+  } else {
+    console.log('PROBE: '+(startNetName||'NOTHING')+' -> '+(endNetName||'NOTHING'));
+    hint('Probed: '+(startNetName||'NOTHING')+' -> '+(endNetName||'NOTHING'));
+  }
+  
+  probeState.active=false;
+  probeState.dragging=false;
+}
+
 // ═══ EVENTS ═══
 svg.addEventListener('mousemove',function(e){
   if(panState.active){
@@ -457,6 +691,39 @@ svg.addEventListener('mousemove',function(e){
       var we=findWireEnd(pt.x,pt.y);
       if(we)showPinRing(we.x,we.y);
     }
+  } else if(S.mode==='probe'){
+    if(probeState.dragging){
+      updateProbeDrag(pt);
+      var nearPin=findPin(pt.x,pt.y,18);
+      if(nearPin&&nearPin.type==='pin'){
+        showProbeHighlight(nearPin.x,nearPin.y,true);
+      } else {
+        var wseg=findWireSeg(pt.x,pt.y,10);
+        var junc=juncAt(pt.x,pt.y);
+        if(wseg||junc){
+          showProbeHighlight(pt.x,pt.y,false);
+        } else {
+          clearProbeHighlight();
+        }
+      }
+      return;
+    }
+    clearProbeHighlight();
+    clearProbeStartHighlight();
+    var nearPin=findPin(pt.x,pt.y,18);
+    if(nearPin&&nearPin.type==='pin'){
+      showProbeHighlight(nearPin.x,nearPin.y,true);
+      svg.style.cursor='crosshair';
+    } else {
+      var wseg=findWireSeg(pt.x,pt.y,10);
+      var junc=juncAt(pt.x,pt.y);
+      if(wseg||junc){
+        showProbeHighlight(pt.x,pt.y,false);
+        svg.style.cursor='crosshair';
+      } else {
+        svg.style.cursor='default';
+      }
+    }
   }
 });
 svg.addEventListener('mousedown',function(e){
@@ -481,7 +748,7 @@ svg.addEventListener('dblclick',function(e){
 svg.addEventListener('mouseup',function(e){
   if(panState.active&&e.button===2){
     panState.active=false;
-    svg.style.cursor=S.mode==='wire'||S.mode==='place'?'crosshair':'default';
+    svg.style.cursor=S.mode==='wire'||S.mode==='place'?'crosshair':(S.mode==='probe'?'crosshair':'default');
     if(!panState.moved){cancelWire();setMode('select');}
     return;
   }
@@ -492,6 +759,10 @@ svg.addEventListener('mouseup',function(e){
     return;
   }
   if(S.drag.active)onDragEnd();
+  if(S.mode==='probe'&&probeState.dragging){
+    var pt=svgPt(e);
+    endProbeDrag(pt);
+  }
 });
 svg.addEventListener('mouseleave',function(){
   if(panState.active){panState.active=false;svg.style.cursor=S.mode==='wire'||S.mode==='place'?'crosshair':'default';}
@@ -530,6 +801,7 @@ function onCanvasDown(e){
   }
   if(S.mode==='place'&&S.placeType){placeComp(S.placeType,snp(pt.x,pt.y));return;}
   if(S.mode==='wire'){handleWireClick(pt);return;}
+  if(S.mode==='probe'){startProbeDrag(e,pt);return;}
 }
 
 function onCompDown(e,compId){
@@ -542,6 +814,30 @@ function onCompDown(e,compId){
 }
 function onWireDown(e,wid){
   if(e.button!==0)return;e.stopPropagation();
+  if(S.mode==='probe'){
+    var pt=svgPt(e);
+    var near=findPin(pt.x,pt.y,18);
+    var isPin=(near&&near.type==='pin');
+    var netName=getNetNameAt(pt.x,pt.y);
+    var hasNet=isPin||!!netName;
+    
+    if(!hasNet){
+      return;
+    }
+    
+    probeState.active=true;
+    probeState.startX=pt.x;
+    probeState.startY=pt.y;
+    probeState.startNetName=netName;
+    probeState.startIsPin=isPin;
+    probeState.dragging=true;
+    
+    showProbeStartHighlight(pt.x,pt.y,isPin);
+    
+    probeDragLineEl=el('line',{x1:pt.x,y1:pt.y,x2:pt.x,y2:pt.y,class:'probe-drag-line'});
+    lyrO.appendChild(probeDragLineEl);
+    return;
+  }
   if(S.mode==='wire'){handleWireClick(svgPt(e));return;}
   if(S.mode==='select'){
     // If this wire is part of a multi-selection, start group drag
@@ -557,6 +853,30 @@ function onWireDown(e,wid){
 }
 function onJuncDown(e,jid){
   if(e.button!==0)return;e.stopPropagation();
+  if(S.mode==='probe'){
+    var pt=svgPt(e);
+    var near=findPin(pt.x,pt.y,18);
+    var isPin=(near&&near.type==='pin');
+    var netName=getNetNameAt(pt.x,pt.y);
+    var hasNet=isPin||!!netName;
+    
+    if(!hasNet){
+      return;
+    }
+    
+    probeState.active=true;
+    probeState.startX=pt.x;
+    probeState.startY=pt.y;
+    probeState.startNetName=netName;
+    probeState.startIsPin=isPin;
+    probeState.dragging=true;
+    
+    showProbeStartHighlight(pt.x,pt.y,isPin);
+    
+    probeDragLineEl=el('line',{x1:pt.x,y1:pt.y,x2:pt.x,y2:pt.y,class:'probe-drag-line'});
+    lyrO.appendChild(probeDragLineEl);
+    return;
+  }
   if(S.mode==='wire'){handleWireClick(svgPt(e));return;}
   if(S.mode==='select'){
     if(S.selected.length>1 && S.selected.some(function(s){return s.type==='junction'&&s.id===jid;})){
@@ -1499,9 +1819,10 @@ document.addEventListener('keydown',function(e){
     e.preventDefault(); cutSelected(); return; }
   if((e.ctrlKey||e.metaKey) && (e.key==='v' || e.key==='V')){
     e.preventDefault(); pasteFromBuffer(); return; }
-  if(e.key==='Escape'){if(S.pasteMode.active){cancelPaste();}else{cancelWire();setMode('select');}}
+  if(e.key==='Escape'){if(S.pasteMode.active){cancelPaste();}else if(S.mode==='probe'){if(probeState.dragging){probeState.dragging=false;}clearAllProbeHighlights();probeState.active=false;setMode('select');}else{cancelWire();setMode('select');}}
   if(e.key==='v'||e.key==='V'){if(!S.pasteMode.active)setMode('select');}
   if(e.key==='w'||e.key==='W')setMode('wire');
+  if(e.key==='p'||e.key==='P')setMode('probe');
   if(e.key==='Delete'||e.key==='Backspace')deleteSelected();
   if(e.key==='r'||e.key==='R'){
     if(S.mode==='place'){placeRot=(placeRot+90)%360;if(S.placeType)showGhost(S.placeType);}
