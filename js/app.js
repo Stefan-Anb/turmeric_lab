@@ -504,7 +504,7 @@ window.addEventListener('resize',function(){applyView();});
 
 function onCanvasDown(e){
   if(e.button!==0)return;
-  var pt=svgPt(e);
+  var pt=snp(svgPt(e).x,svgPt(e).y);
   if(S.pasteMode.active){
     confirmPaste(pt.x-S.pasteMode.origX,pt.y-S.pasteMode.origY);
     return;
@@ -1165,18 +1165,21 @@ function pasteFromBuffer(){
 
 function updatePasteGhosts(dx,dy){
   if(!S.pasteMode.active)return;
-  var baseX=S.pasteMode.origX+dx;
-  var baseY=S.pasteMode.origY+dy;
+  var snapped=snp(S.pasteMode.origX+dx,S.pasteMode.origY+dy);
+  var baseX=snapped.x;
+  var baseY=snapped.y;
+  var origX=S.pasteMode.origX;
+  var origY=S.pasteMode.origY;
   for(var i=0;i<S.pasteMode.ghostCompEls.length;i++){
     var oc=S.buffer.comps[i];
-    var nx=oc.x+(dx);
-    var ny=oc.y+(dy);
+    var nx=snp(oc.x+dx,oc.y+dy).x;
+    var ny=snp(oc.x+dx,oc.y+dy).y;
     S.pasteMode.ghostCompEls[i].setAttribute('transform','translate('+nx+','+ny+')');
   }
   for(var i=0;i<S.pasteMode.ghostJuncEls.length;i++){
     var oj=S.buffer.junctions[i];
-    var nx=oj.x+(dx);
-    var ny=oj.y+(dy);
+    var nx=snp(oj.x+dx,oj.y+dy).x;
+    var ny=snp(oj.x+dx,oj.y+dy).y;
     S.pasteMode.ghostJuncEls[i].setAttribute('cx',nx);
     S.pasteMode.ghostJuncEls[i].setAttribute('cy',ny);
   }
@@ -1184,7 +1187,8 @@ function updatePasteGhosts(dx,dy){
     var ow=S.buffer.wires[i];
     var newPoints=[];
     for(var j=0;j<ow.points.length;j++){
-      newPoints.push({x:ow.points[j].x+(dx),y:ow.points[j].y+(dy)});
+      var sp=snp(ow.points[j].x+dx,ow.points[j].y+dy);
+      newPoints.push(sp);
     }
     var pathD=pts2path(newPoints);
     S.pasteMode.ghostWireEls[i].hit.setAttribute('d',pathD);
@@ -1213,19 +1217,21 @@ function cancelPaste(){
 function confirmPaste(dx,dy){
   if(!S.pasteMode.active)return;
   for(var i=0;i<S.pasteMode.ghostCompEls.length;i++){
-    var nc={id:S.pasteMode.compMap[S.buffer.comps[i].id],type:S.buffer.comps[i].type,x:S.buffer.comps[i].x+dx,y:S.buffer.comps[i].y+dy,label:S.buffer.comps[i].label,value:S.buffer.comps[i].value,rot:S.buffer.comps[i].rot,mirror:S.buffer.comps[i].mirror};
+    var sp=snp(S.buffer.comps[i].x+dx,S.buffer.comps[i].y+dy);
+    var nc={id:S.pasteMode.compMap[S.buffer.comps[i].id],type:S.buffer.comps[i].type,x:sp.x,y:sp.y,label:S.buffer.comps[i].label,value:S.buffer.comps[i].value,rot:S.buffer.comps[i].rot,mirror:S.buffer.comps[i].mirror};
     S.components.push(nc);
     S.pasteMode.ghostCompEls[i].remove();
   }
   for(var i=0;i<S.pasteMode.ghostJuncEls.length;i++){
-    var nj={id:S.pasteMode.juncMap[S.buffer.junctions[i].id],x:S.buffer.junctions[i].x+dx,y:S.buffer.junctions[i].y+dy,wires:[]};
+    var sp=snp(S.buffer.junctions[i].x+dx,S.buffer.junctions[i].y+dy);
+    var nj={id:S.pasteMode.juncMap[S.buffer.junctions[i].id],x:sp.x,y:sp.y,wires:[]};
     S.junctions.push(nj);
     S.pasteMode.ghostJuncEls[i].remove();
   }
   for(var i=0;i<S.buffer.wires.length;i++){
     var ow=S.buffer.wires[i];
     var newPoints=[];
-    for(var j=0;j<ow.points.length;j++){newPoints.push({x:ow.points[j].x+dx,y:ow.points[j].y+dy});}
+    for(var j=0;j<ow.points.length;j++){var sp=snp(ow.points[j].x+dx,ow.points[j].y+dy);newPoints.push(sp);}
     var newFrom=null,newTo=null;
     if(ow.from&&ow.from.compId&&S.pasteMode.compMap[ow.from.compId]){
       newFrom={type:'pin',compId:S.pasteMode.compMap[ow.from.compId],pinIdx:ow.from.pinIdx};
@@ -1475,8 +1481,8 @@ document.addEventListener('keydown',function(e){
     e.preventDefault(); cutSelected(); return; }
   if((e.ctrlKey||e.metaKey) && (e.key==='v' || e.key==='V')){
     e.preventDefault(); pasteFromBuffer(); return; }
-  if(e.key==='Escape'){cancelWire();setMode('select');}
-  if(e.key==='v'||e.key==='V')setMode('select');
+  if(e.key==='Escape'){if(S.pasteMode.active){cancelPaste();}else{cancelWire();setMode('select');}}
+  if(e.key==='v'||e.key==='V'){if(!S.pasteMode.active)setMode('select');}
   if(e.key==='w'||e.key==='W')setMode('wire');
   if(e.key==='Delete'||e.key==='Backspace')deleteSelected();
   if(e.key==='r'||e.key==='R'){
