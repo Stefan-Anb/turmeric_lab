@@ -109,31 +109,36 @@
 <div id="custom-comp-section" style="display:none">
       <div class="props-header" style="border-top:1px solid var(--border);margin-top:12px;padding-top:12px">Custom Components</div>
       <div class="cc-select-all-row">
+        <button class="tb-btn" onclick="newCustomComp()" style="font-size:10px;padding:2px 6px;margin-right:4px">New</button>
         <button class="tb-btn" onclick="importCustomComp()" style="font-size:10px;padding:2px 6px;margin-right:4px">Import</button>
         <button class="tb-btn" onclick="exportSelectedCustomComps()" style="font-size:10px;padding:2px 6px">Export</button>
         <span style="flex:1"></span>
         <span style="font-size:11px;color:var(--text-lo);min-width:50px;margin-right:2px">Select All</span>
-        <input type="checkbox" id="cc-select-all" onchange="toggleAllCustomComps(this.checked)" style="margin:0"/>
+        <input type="checkbox" id="cc-select-all" onchange="toggleAllCustomComps(this.checked)"/>
       </div>
       <div id="custom-comps-list" style="padding:4px 12px;max-height:150px;overflow-y:auto"></div>
-      <div class="props-sect">Create New</div>
-      <div class="prop-row"><div class="prop-lbl">Component Name</div>
-        <input class="prop-input" id="cc-name" type="text" placeholder="Custom"/></div>
-      <div class="prop-row"><div class="prop-lbl">Part Prefix</div>
-        <input class="prop-input" id="cc-prefix" type="text" placeholder="U" style="width:60px"/></div>
-      <div class="prop-row"><div class="prop-lbl">Left Pins</div>
-        <div id="cc-left-pins"></div>
-        <button class="tb-btn" onclick="addCustomPin('left')" style="margin-top:4px;font-size:10px;padding:4px 8px">+ Add</button></div>
-      <div class="prop-row"><div class="prop-lbl">Right Pins</div>
-        <div id="cc-right-pins"></div>
-        <button class="tb-btn" onclick="addCustomPin('right')" style="margin-top:4px;font-size:10px;padding:4px 8px">+ Add</button></div>
-      <div class="prop-row"><div class="prop-lbl">Description</div>
-        <input class="prop-input" id="cc-desc" type="text" placeholder="Description"/></div>
-      <div class="prop-row"><div class="prop-lbl">Model</div>
-        <input class="prop-input" id="cc-model" type="text" placeholder="Model"/></div>
-      <div class="prop-row" style="flex-direction:row;gap:8px;padding-top:8px">
-        <button class="tb-btn" onclick="createCustomComp()" style="flex:1">Create</button>
+      <div id="custom-comp-edit" style="display:none">
+        <div class="props-sect">Edit Component</div>
+        <div class="prop-row"><div class="prop-lbl">Component Name</div>
+          <input class="prop-input" id="cc-name" type="text" placeholder="Custom"/></div>
+        <div class="prop-row"><div class="prop-lbl">Part Prefix</div>
+          <input class="prop-input" id="cc-prefix" type="text" placeholder="U" style="width:60px"/></div>
+        <div class="prop-row"><div class="prop-lbl">Left Pins</div>
+          <div id="cc-left-pins"></div>
+          <button class="tb-btn" onclick="addCustomPin('left')" style="margin-top:4px;font-size:10px;padding:4px 8px">+ Add</button></div>
+        <div class="prop-row"><div class="prop-lbl">Right Pins</div>
+          <div id="cc-right-pins"></div>
+          <button class="tb-btn" onclick="addCustomPin('right')" style="margin-top:4px;font-size:10px;padding:4px 8px">+ Add</button></div>
+        <div class="prop-row"><div class="prop-lbl">Description</div>
+          <input class="prop-input" id="cc-desc" type="text" placeholder="Description"/></div>
+        <div class="prop-row"><div class="prop-lbl">Model</div>
+          <input class="prop-input" id="cc-model" type="text" placeholder="Model"/></div>
+        <div class="prop-row" style="flex-direction:row;gap:8px;padding-top:8px">
+          <button id="cc-create-btn" class="tb-btn" onclick="applyCustomComp()" style="flex:1">Apply</button>
+        </div>
       </div>
+      <input type="file" id="custom-import-file" accept=".json" style="display:none" onchange="handleCustomImport(event)"/>
+    </div>
       <input type="file" id="custom-import-file" accept=".json" style="display:none" onchange="handleCustomImport(event)"/>
     </div>
   </div>

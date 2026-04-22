@@ -56,31 +56,33 @@ function mergeCustomComponents(){
   }
 }
 
-function createCustomCompDef(config){
+function createCustomCompDef(providedKey,config){
   var name=config.name||'Custom';
   var prefix=config.prefix||'U';
   var leftPins=config.leftPins||[];
   var rightPins=config.rightPins||[];
   var desc=config.description||'';
   var model=config.model||'';
-  var key='custom_'+name.replace(/[^a-zA-Z0-9]/g,'_').toLowerCase();
+  var key=providedKey||('custom_'+name.replace(/[^a-zA-Z0-9]/g,'_').toLowerCase());
   var maxLeftLen=0, maxRightLen=0;
   for(var i=0;i<leftPins.length;i++)if(leftPins[i]&&leftPins[i].trim())maxLeftLen=Math.max(maxLeftLen,leftPins[i].length);
   for(var i=0;i<rightPins.length;i++)if(rightPins[i]&&rightPins[i].trim())maxRightLen=Math.max(maxRightLen,rightPins[i].length);
-  var pad=30;
-  var bodyW=Math.max(80,Math.max(maxLeftLen,maxRightLen)*9+pad*2);
-  var bodyH=Math.max(60,(Math.max(leftPins.length,rightPins.length)-1)*20+40);
-  var leftX=-bodyW/2-20;
-  var rightX=bodyW/2+20;
+  var textWidth=Math.max(maxLeftLen,maxRightLen)*12;
+  var bodyW=Math.max(80,textWidth+100);
+  var bodyH=Math.max(60,(Math.max(leftPins.length,rightPins.length)-1)*20+50);
+  var pinStartY=Math.round((-bodyH/2+30)/20)*20;
+  if(pinStartY<-bodyH/2+20)pinStartY=-bodyH/2+20;
+  var leftX=-Math.round((bodyW/2+20)/20)*20;
+  var rightX=Math.round((bodyW/2+20)/20)*20;
   var pins=[];
   for(var i=0;i<leftPins.length;i++){
     if(leftPins[i]&&leftPins[i].trim()){
-      pins.push({x:-(bodyW/2+20),y:-bodyH/2+30+i*20,n:leftPins[i].trim()});
+      pins.push({x:leftX,y:pinStartY+i*20,n:leftPins[i].trim()});
     }
   }
   for(var i=0;i<rightPins.length;i++){
     if(rightPins[i]&&rightPins[i].trim()){
-      pins.push({x:bodyW/2+20,y:-bodyH/2+30+i*20,n:rightPins[i].trim()});
+      pins.push({x:rightX,y:pinStartY+i*20,n:rightPins[i].trim()});
     }
   }
   var partCount=0;
@@ -93,15 +95,13 @@ function createCustomCompDef(config){
     draw:function(g,v){
       R(g,-bodyW/2,-bodyH/2,bodyW,bodyH,'comp-body');
       T(g,0,-bodyH/2-8,v.label||prefix+(partCount+1),'comp-label');
-      T(g,0,bodyH/2+8,name,'comp-value');
+      T(g,0,bodyH/2+22,name,'comp-value');
       for(var i=0;i<pins.length;i++){
         var pin=pins[i];
         var isLeft=pin.x<0;
-        var pinY=pin.y;
         var frameX=isLeft?-bodyW/2:bodyW/2;
-        var outX=isLeft?frameX-20:frameX+20;
-        L(g,frameX,pinY,outX,pinY,'comp-pin');
-        var textEl=el('text',{x:isLeft?frameX+8:frameX-8,y:pinY+4});
+        L(g,frameX,pin.y,pin.x,pin.y,'comp-pin');
+        var textEl=el('text',{x:isLeft?frameX+8:frameX-8,y:pin.y+4});
         textEl.textContent=pin.n;
         textEl.setAttribute('class','comp-label');
         textEl.setAttribute('text-anchor',isLeft?'start':'end');

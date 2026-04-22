@@ -254,6 +254,9 @@ function updateStatus(){
 
 // ═══ PROPERTIES PANEL ═══
 function renderProps(){
+  document.getElementById('custom-comp-section').style.display='none';
+  document.getElementById('custom-comp-edit').style.display='none';
+  document.getElementById('props-content').style.display='block';
   const pc=document.getElementById('props-content');
   if(!S.selected.length){pc.innerHTML='<div class="props-empty">Select a component<br>to edit its properties</div>';return;}
   if(S.selected.length>1){pc.innerHTML='<div class="props-empty">'+S.selected.length+' items selected</div>';return;}
@@ -1512,9 +1515,10 @@ document.addEventListener('keydown',function(e){
 function hint(m){document.getElementById('sb-hint').textContent=m;}
 
 function showCustomCompPanel(){
+  editingCustomCompKey=null;
   document.getElementById('custom-comp-section').style.display='block';
+  document.getElementById('custom-comp-edit').style.display='none';
   document.getElementById('props-content').style.display='none';
-  renderCustomCompExportList();
   ccLeftPins=[''];
   ccRightPins=[''];
   renderCustomPinInputs('left');
@@ -1530,9 +1534,41 @@ function hideCustomCompPanel(){
   document.getElementById('props-content').style.display='block';
 }
 
+function editCustomComp(key){
+  var comp=customComponents[key];
+  if(!comp)return;
+  editingCustomCompKey=key;
+  document.getElementById('cc-name').value=comp._name||comp.lbl||'';
+  document.getElementById('cc-prefix').value=comp.lbl||'U';
+  document.getElementById('cc-desc').value=comp._desc||'';
+  document.getElementById('cc-model').value=comp._model||'';
+  ccLeftPins=[];
+  ccRightPins=[];
+  if(comp.pins){
+    for(var i=0;i<comp.pins.length;i++){
+      var pin=comp.pins[i];
+      if(pin.x<0)ccLeftPins.push(pin.n);
+      else ccRightPins.push(pin.n);
+    }
+  }
+  if(ccLeftPins.length===0)ccLeftPins=[''];
+  if(ccRightPins.length===0)ccRightPins=[''];
+  renderCustomPinInputs('left');
+  renderCustomPinInputs('right');
+  document.getElementById('props-content').style.display='none';
+  document.getElementById('custom-comp-section').style.display='block';
+  document.getElementById('custom-comp-edit').style.display='block';
+  var btn=document.getElementById('cc-create-btn');
+  if(btn){
+    btn.textContent='Apply';
+    btn.onclick=applyCustomComp;
+  }
+}
+
 // ═══ CUSTOM COMPONENT FUNCTIONS ═══
 var ccLeftPins=[];
 var ccRightPins=[];
+var editingCustomCompKey=null;
 
 function renderCustomPinInputs(side){
   var container=document.getElementById('cc-'+side+'-pins');
@@ -1559,21 +1595,56 @@ function removeCustomPin(side,idx){
   else{ccRightPins.splice(idx,1);renderCustomPinInputs('right');}
 }
 
-function createCustomComp(){
+function newCustomComp(){
+  var name='Custom';
+  var prefix='U';
+  var key='custom_'+name.toLowerCase();
+  var cnt=1;
+  while(customComponents[key+cnt])cnt++;
+  var fullKey=key+cnt;
+  var config={
+    name:name+cnt,
+    prefix:prefix,
+    leftPins:[''],
+    rightPins:[''],
+    description:'',
+    model:''
+  };
+  createCustomCompDef(fullKey,config);
+  customComponents[fullKey]._name=name+cnt;
+  mergeCustomComponents();
+  renderCustomCompsList();
+  saveSchematic();
+  editCustomComp(fullKey);
+}
+
+function applyCustomComp(){
   var name=document.getElementById('cc-name').value.trim()||'Custom';
   var prefix=document.getElementById('cc-prefix').value.trim()||'U';
   var desc=document.getElementById('cc-desc').value.trim();
   var model=document.getElementById('cc-model').value.trim();
   var validLeft=ccLeftPins.filter(function(p){return p.trim();});
   var validRight=ccRightPins.filter(function(p){return p.trim();});
-  var key='custom_'+name.replace(/[^a-zA-Z0-9]/g,'_').toLowerCase();
-  if(customComponents[key]){
-    alert('Component with name "'+name+'" already exists. Use a different name.');
-    return;
-  }
   if(validLeft.length===0&&validRight.length===0){
     alert('Please add at least one signal name on either side');
     return;
+  }
+  var existingKey=editingCustomCompKey;
+  var newKey='custom_'+name.replace(/[^a-zA-Z0-9]/g,'_').toLowerCase();
+  if(existingKey && newKey!==existingKey && customComponents[newKey]){
+    alert('Component with name "'+name+'" already exists. Use a different name.');
+    return;
+  }
+  if(existingKey && existingKey!==newKey){
+    for(var i=0;i<S.components.length;i++){
+      if(S.components[i].type===existingKey){
+        S.components[i].type=newKey;
+      }
+    }
+  }
+  if(existingKey){
+    delete customComponents[existingKey];
+    delete CD[existingKey];
   }
   var config={
     name:name,
@@ -1583,11 +1654,12 @@ function createCustomComp(){
     description:desc,
     model:model
   };
-  createCustomCompDef(config);
+  var key=createCustomCompDef(newKey,config);
   mergeCustomComponents();
   renderCustomCompsList();
+  renderAll();
   saveSchematic();
-  selectComp(key);
+  editCustomComp(key);
 }
 
 function renderCustomCompsList(){
@@ -1623,7 +1695,7 @@ function renderCustomCompsList(){
     nameLbl.style.color='var(--text-hi)';
     nameLbl.style.cursor='pointer';
     nameLbl.textContent=def._name||def.lbl;
-    nameLbl.onclick=function(k){return function(){selectComp(k);hideCustomCompPanel();};}(key);
+    nameLbl.onclick=function(k){return function(){editCustomComp(k);};}(key);
     var chk=document.createElement('input');
     chk.type='checkbox';
     chk.value=key;
