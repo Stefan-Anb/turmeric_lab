@@ -1,0 +1,239 @@
+// ═══════════════════════════════════════════════════
+// SVG HELPERS
+// ═══════════════════════════════════════════════════
+function el(tag,attrs){const e=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const[k,v]of Object.entries(attrs))e.setAttribute(k,v);return e;}
+function L(p,x1,y1,x2,y2,cls){const e=el('line',{x1,y1,x2,y2});if(cls)e.setAttribute('class',cls);p.appendChild(e);return e;}
+const LE=L;
+function R(p,x,y,w,h,cls){const e=el('rect',{x,y,width:w,height:h});if(cls)e.setAttribute('class',cls);p.appendChild(e);return e;}
+function CE(p,cx,cy,r,cls){const e=el('circle',{cx,cy,r});if(cls)e.setAttribute('class',cls);p.appendChild(e);return e;}
+function PE(p,d,cls){const e=el('path',{d});if(cls)e.setAttribute('class',cls);p.appendChild(e);return e;}
+function PY(p,pts,cls){const e=el('polygon',{points:pts});if(cls)e.setAttribute('class',cls);p.appendChild(e);return e;}
+function T(p,x,y,s,cls){const e=el('text',{x,y});if(cls)e.setAttribute('class',cls);e.textContent=s;e.setAttribute('text-anchor','middle');p.appendChild(e);return e;}
+function TE(p,x,y,s,cls){const e=el('text',{x,y});if(cls)e.setAttribute('class',cls);e.textContent=s;e.setAttribute('text-anchor','middle');p.appendChild(e);return e;}
+function TA(p,x,y,s,cls){const e=el('text',{x,y});if(cls)e.setAttribute('class',cls);e.textContent=s;e.setAttribute('text-anchor','middle');e.setAttribute('dominant-baseline','middle');p.appendChild(e);return e;}
+function AH(p,x1,y1,x2,y2){
+  const dx=x2-x1,dy=y2-y1,len=Math.sqrt(dx*dx+dy*dy),nx=dx/len,ny=dy/len,px=-ny,py=nx;
+  PY(p,`${x2},${y2} ${x2-nx*10+px*4},${y2-ny*10+py*4} ${x2-nx*10-px*4},${y2-ny*10-py*4}`,'comp-body');
+}
+
+// ═══════════════════════════════════════════════════
+// COMPONENT LIBRARY — static definitions
+// All pin.x/pin.y must be multiples of GRID (20).
+// Symbols are drawn relative to (0,0) = anchor.
+// GND: pin at (0,0) top, body goes downward.
+// VCC: pin at (0,0) bottom, body goes upward.
+// ═══════════════════════════════════════════════════
+const CD={
+  resistor:{
+    lbl:'R',val:'1k',hitW:100,hitH:40,
+    props:{label:{l:'Reference'},value:{l:'Value'}},
+    pins:[{x:-40,y:0,n:'A'},{x:40,y:0,n:'B'}],
+    draw(g,v){
+      L(g,-40,0,-14,0,'comp-pin');R(g,-14,-7,28,14,'comp-body');L(g,14,0,40,0,'comp-pin');
+        T(g,0,-14,v.label||'R','comp-label');T(g,0,24,v.value||'','comp-value');
+    }
+  },
+  capacitor:{
+    lbl:'C',val:'100n',hitW:100,hitH:50,
+    props:{label:{l:'Reference'},value:{l:'Value'}},
+    pins:[{x:0,y:-40,n:'A'},{x:0,y:40,n:'B'}],
+    draw(g,v){
+      const ig=el('g',{transform:'rotate(90)'});g.appendChild(ig);
+      L(ig,-40,0,-7,0,'comp-pin');
+      LE(ig,-7,-14,-7,14,'comp-body');LE(ig,7,-14,7,14,'comp-body');
+      L(ig,7,0,40,0,'comp-pin');
+        T(g,10,-18,v.label||'C','comp-label');T(g,24,24,v.value||'','comp-value');
+    }
+  },
+  inductor:{
+    lbl:'L',val:'10µH',hitW:100,hitH:40,
+    props:{label:{l:'Reference'},value:{l:'Value'}},
+    pins:[{x:-40,y:0,n:'A'},{x:40,y:0,n:'B'}],
+    draw(g,v){
+      L(g,-40,0,-20,0,'comp-pin');
+      PE(g,'M-20,0 Q-15,-12 -10,0 Q-5,-12 0,0 Q5,-12 10,0 Q15,-12 20,0','comp-body');
+      L(g,20,0,40,0,'comp-pin');
+        T(g,0,-18,v.label||'L','comp-label');T(g,0,20,v.value||'','comp-value');
+    }
+  },
+  diode:{
+    lbl:'D',val:'1N4148',hitW:100,hitH:40,
+    props:{label:{l:'Reference'},value:{l:'Part'}},
+    pins:[{x:40,y:0,n:'A'},{x:-40,y:0,n:'K'}],
+    draw(g,v){
+      const ig=el('g',{transform:'rotate(180)'});g.appendChild(ig);
+      L(ig,-40,0,-12,0,'comp-pin');
+      PY(ig,'-12,0 12,-12 12,12','comp-body');LE(ig,12,-12,12,12,'comp-body');
+      L(ig,12,0,40,0,'comp-pin');
+        T(g,0,-18,v.label||'D','comp-label');T(g,0,30,v.value||'','comp-value');
+    }
+  },
+  led:{
+    lbl:'D',val:'RED',hitW:100,hitH:40,
+    props:{label:{l:'Reference'},value:{l:'Color'}},
+    pins:[{x:-40,y:0,n:'A'},{x:40,y:0,n:'K'}],
+    draw(g,v){
+      L(g,-40,0,-12,0,'comp-pin');
+      const t=PY(g,'-12,0 12,-12 12,12','comp-body');t.style.stroke='#ff9040';t.style.fill='#1a0800';
+      const b=LE(g,12,-12,12,12,'comp-body');b.style.stroke='#ff9040';
+      L(g,12,0,40,0,'comp-pin');
+      const a1=LE(g,16,-10,24,-20,'comp-pin');a1.style.stroke='#ff9040';
+      const a2=LE(g,22,-7,30,-17,'comp-pin');a2.style.stroke='#ff9040';
+      T(g,0,-24,v.label||'D','comp-label');
+    }
+  },
+  npn:{
+    lbl:'Q',val:'2N2222',hitW:100,hitH:100,
+    props:{label:{l:'Reference'},value:{l:'Part'}},
+    pins:[{x:-40,y:0,n:'B'},{x:20,y:-40,n:'C'},{x:20,y:40,n:'E'}],
+    draw(g,v){
+      L(g,-40,0,-8,0,'comp-pin');
+      LE(g,-8,-20,-8,20,'comp-body');
+      LE(g,-8,-14,12,-26,'comp-body');LE(g,-8,14,12,26,'comp-body');
+      L(g,12,-26,20,-40,'comp-pin');L(g,12,26,20,40,'comp-pin');
+      AH(g,12,26,20,40);
+        T(g,-8,-30,v.label||'Q','comp-label');
+        var valEl = el('text', {x:-12, y:30}); valEl.textContent = v.value||'2N2222'; valEl.setAttribute('class','comp-value'); valEl.setAttribute('text-anchor','end'); g.appendChild(valEl);
+    }
+  },
+  pnp:{
+    lbl:'Q',val:'2N2907',hitW:100,hitH:100,
+    props:{label:{l:'Reference'},value:{l:'Part'}},
+    pins:[{x:-40,y:0,n:'B'},{x:20,y:-40,n:'C'},{x:20,y:40,n:'E'}],
+    draw(g,v){
+      L(g,-40,0,-8,0,'comp-pin');
+      LE(g,-8,-20,-8,20,'comp-body');
+      LE(g,-8,-14,12,-26,'comp-body');LE(g,-8,14,12,26,'comp-body');
+      L(g,12,-26,20,-40,'comp-pin');L(g,12,26,20,40,'comp-pin');
+      AH(g,20,-40,12,-26);
+        T(g,-8,-30,v.label||'Q','comp-label');
+        var valEl = el('text', {x:-12, y:30}); valEl.textContent = v.value||'2N2907'; valEl.setAttribute('class','comp-value'); valEl.setAttribute('text-anchor','end'); g.appendChild(valEl);
+    }
+  },
+  nmos:{
+    lbl:'M',val:'2N7000',hitW:100,hitH:100,
+    props:{label:{l:'Reference'},value:{l:'Part'}},
+    pins:[{x:-40,y:0,n:'G'},{x:20,y:-40,n:'D'},{x:20,y:40,n:'S'}],
+    draw(g,v){
+      L(g,-40,0,-12,0,'comp-pin');
+      LE(g,-12,-20,-12,20,'comp-body');LE(g,-4,-16,-4,16,'comp-body');
+      LE(g,-4,-12,12,-12,'comp-body');LE(g,-4,0,12,0,'comp-body');LE(g,-4,12,12,12,'comp-body');
+      L(g,12,-12,20,-40,'comp-pin');L(g,12,12,20,40,'comp-pin');
+      AH(g,4,0,-4,0);
+        T(g,-8,-30,v.label||'M','comp-label');
+        var valEl = el('text', {x:-12, y:38}); valEl.textContent = v.value||'2N7000'; valEl.setAttribute('class','comp-value'); valEl.setAttribute('text-anchor','end'); g.appendChild(valEl);
+    }
+  },
+  source:{
+    lbl:'SRC',val:'5V',hitW:100,hitH:60,
+    props:{
+      mode:{l:'Mode',type:'enum',options:[{v:'DC',l:'DC'},{v:'AC',l:'AC'},{v:'PULSE',l:'Pulse'},{v:'BEHAV',l:'Behavioural'}]},
+      meas:{l:'Show',type:'enum',options:[{v:'V',l:'Voltage'},{v:'I',l:'Current'}]},
+      label:{l:'Reference'},
+      // DC
+      value:{l:'Voltage (V)',modes:['DC']},
+      // AC params
+      ac_offset:{l:'Offset (V)',modes:['AC']},
+      ac_amplitude:{l:'Amplitude (V)',modes:['AC']},
+      ac_frequency:{l:'Frequency (Hz)',modes:['AC']},
+      ac_tdelay:{l:'TDelay (s)',modes:['AC']},
+      ac_theta:{l:'Theta (1/s)',modes:['AC']},
+      ac_phi:{l:'Phi (deg)',modes:['AC']},
+      ac_ncycles:{l:'Ncycles',modes:['AC']},
+      // Pulse params
+      pulse_vinit:{l:'Vinitial (V)',modes:['PULSE']},
+      pulse_von:{l:'Von (V)',modes:['PULSE']},
+      pulse_tdelay:{l:'TDelay (s)',modes:['PULSE']},
+      pulse_trise:{l:'Trise (s)',modes:['PULSE']},
+      pulse_tfall:{l:'Tfall (s)',modes:['PULSE']},
+      pulse_ton:{l:'Ton (s)',modes:['PULSE']},
+      pulse_tperiod:{l:'Tperiod (s)',modes:['PULSE']},
+      pulse_ncycles:{l:'Ncycles',modes:['PULSE']},
+      // Behavioural
+      beh_eq:{l:'Equation',modes:['BEHAV']}
+    },
+    pins:[{x:0,y:-40,n:'+'},{x:0,y:40,n:'-'}],
+    draw(g,v){
+      const mode=(v.mode||'DC');
+      const meas=(v.meas||'V');
+      const ig=el('g',{transform:'rotate(90)'});g.appendChild(ig);
+      CE(ig,0,0,20,'comp-body');
+      L(ig,-40,0,-20,0,'comp-pin');L(ig,20,0,40,0,'comp-pin');
+      // inner plate/wave or line
+      if(mode==='AC'){
+        PE(ig,'M-10,0 Q-5,-10 0,0 Q5,10 10,0','comp-body');
+      } else {
+        LE(ig,-9,-5,-9,5,'comp-body');LE(ig,7,-5,7,5,'comp-body');
+        LE(ig,5,-7,9,-7,'comp-body');
+      }
+      // Render mode symbol (~ or -) and measurement letter (V/I)
+      const sym=(mode==='AC')?'~':'-';
+        T(g,14,-18,sym,'comp-label');
+        T(g,14,32,meas,'comp-value');
+      // place the reference/name to the right of the symbol
+      const lblEl=el('text',{x:28,y:0});lblEl.textContent=v.label||'SRC';lblEl.setAttribute('class','comp-label');lblEl.setAttribute('text-anchor','start');lblEl.setAttribute('dominant-baseline','middle');g.appendChild(lblEl);
+    }
+  },
+  gnd:{
+    lbl:'GND',val:'',hitW:40,hitH:60,
+    props:{label:{l:'Net Name'}},
+    pins:[{x:0,y:0,n:'GND'}],
+    draw(g,v){
+      L(g,0,0,0,10,'comp-pin');
+      LE(g,-20,10,20,10,'comp-body');
+      LE(g,-13,18,13,18,'comp-body');
+      LE(g,-5,26,5,26,'comp-body');
+    }
+  },
+  vcc:{
+    lbl:'VCC',val:'+5V',hitW:60,hitH:40,
+    props:{label:{l:'Net Name'},value:{l:'Voltage'}},
+    pins:[{x:0,y:0,n:'VCC'}],
+    draw(g,v){
+      L(g,0,0,0,-10,'comp-pin');
+      LE(g,-20,-10,20,-10,'comp-body');
+      const t=TE(g,0,-24,v.value||v.label||'VCC','comp-label');
+      t.style.fill='#00c8ff';t.style.fontSize='18px';
+    }
+  },
+  opamp:{
+    lbl:'U',val:'TL071',hitW:140,hitH:100,
+    props:{label:{l:'Reference'},value:{l:'Part'}},
+    pins:[{x:-60,y:-20,n:'IN-'},{x:-60,y:20,n:'IN+'},{x:60,y:0,n:'OUT'}],
+    draw(g,v){
+      PY(g,'-40,-40 -40,40 40,0','comp-body');
+      L(g,-60,-20,-40,-20,'comp-pin');L(g,-60,20,-40,20,'comp-pin');L(g,40,0,60,0,'comp-pin');
+      TA(g,-28,-20,'−','comp-label');TA(g,-28,20,'+','comp-label');
+      T(g,2,-31,v.label||'U','comp-label');
+      // place component value under the name; value shown if present
+      if(v.value){
+        var valEl = el('text',{x:2,y:50}); valEl.textContent = v.value; valEl.setAttribute('class','comp-value'); valEl.setAttribute('text-anchor','middle'); g.appendChild(valEl);
+      }
+    }
+  },
+  sw:{
+    lbl:'SW',val:'SW1',hitW:100,hitH:50,
+    props:{label:{l:'Reference'},value:{l:'Name'}},
+    pins:[{x:-40,y:0,n:'A'},{x:40,y:0,n:'B'}],
+    draw(g,v){
+      L(g,-40,0,-14,0,'comp-pin');
+      CE(g,-14,0,4,'pin-dot');CE(g,14,0,4,'pin-dot');
+      LE(g,-14,0,12,-16,'comp-body');
+      L(g,14,0,40,0,'comp-pin');
+      T(g,0,-22,v.label||'SW','comp-label');
+    }
+  },
+  netconn:{
+    lbl:'NET',val:'',hitW:260,hitH:40,
+    props:{label:{l:'Net Name'}},
+    pins:[{x:-20,y:0,n:'~'}],
+    draw(g,v){
+      var nm=v.label||'?';
+      // Flag arrow pointing right: pin on left
+      L(g,-20,0,0,0,'comp-pin');
+      PE(g,'M0,-14 L60,-14 L80,0 L60,14 L0,14 Z','comp-body');
+      var t=TA(g,40,0,nm,'comp-label');
+      t.style.fill='#00c8ff';t.style.fontSize='18px';t.style.fontWeight='bold';
+    }
+  }
+};
