@@ -1545,10 +1545,16 @@ function editCustomComp(key){
   ccLeftPins=[];
   ccRightPins=[];
   if(comp.pins){
+    var leftCount=0,rightCount=0;
     for(var i=0;i<comp.pins.length;i++){
       var pin=comp.pins[i];
-      if(pin.x<0)ccLeftPins.push(pin.n);
-      else ccRightPins.push(pin.n);
+      if(pin.x<0){
+        while(ccLeftPins.length<=i)ccLeftPins.push('');
+        ccLeftPins[i]=pin.n||'';
+      }else{
+        while(ccRightPins.length<=i)ccRightPins.push('');
+        ccRightPins[i]=pin.n||'';
+      }
     }
   }
   if(ccLeftPins.length===0)ccLeftPins=[''];
@@ -1804,3 +1810,38 @@ loadSchematic();
 applyView();renderAll();renderProps();
 if(undoStack.length===0){ clearHistory(); pushState(); }
 if(Object.keys(customComponents).length>0){renderCustomCompsList();}
+
+// ═══ SIDEBAR RESIZERS ═══
+function initResizer(sidebarId,resizerId,isLeft){
+  var sidebar=document.getElementById(sidebarId);
+  if(!sidebar) return;
+  var resizer=document.createElement('div');
+  resizer.id=resizerId;
+  resizer.className='sidebar-resizer';
+  sidebar.appendChild(resizer);
+  var minWidth=parseInt(getComputedStyle(sidebar).minWidth)||180;
+  var startX,startWidth;
+  function onMouseDown(e){
+    startX=e.clientX;
+    startWidth=sidebar.offsetWidth;
+    resizer.classList.add('dragging');
+    document.body.style.cursor='ew-resize';
+    document.addEventListener('mousemove',onMouseMove);
+    document.addEventListener('mouseup',onMouseUp);
+    e.preventDefault();
+  }
+  function onMouseMove(e){
+    var dx=e.clientX-startX;
+    var newWidth=isLeft?startWidth-dx:startWidth+dx;
+    if(newWidth>=minWidth) sidebar.style.width=newWidth+'px';
+  }
+  function onMouseUp(){
+    resizer.classList.remove('dragging');
+    document.body.style.cursor='';
+    document.removeEventListener('mousemove',onMouseMove);
+    document.removeEventListener('mouseup',onMouseUp);
+  }
+  resizer.addEventListener('mousedown',onMouseDown);
+}
+initResizer('sidebar','sidebar-resizer',false);
+initResizer('propspanel','propspanel-resizer',true);

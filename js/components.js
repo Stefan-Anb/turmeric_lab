@@ -76,13 +76,13 @@ function createCustomCompDef(providedKey,config){
   var rightX=Math.round((bodyW/2+20)/20)*20;
   var pins=[];
   for(var i=0;i<leftPins.length;i++){
-    if(leftPins[i]&&leftPins[i].trim()){
-      pins.push({x:leftX,y:pinStartY+i*20,n:leftPins[i].trim()});
+    if(leftPins[i]!==undefined){
+      pins.push({x:leftX,y:pinStartY+i*20,n:leftPins[i]});
     }
   }
   for(var i=0;i<rightPins.length;i++){
-    if(rightPins[i]&&rightPins[i].trim()){
-      pins.push({x:rightX,y:pinStartY+i*20,n:rightPins[i].trim()});
+    if(rightPins[i]!==undefined){
+      pins.push({x:rightX,y:pinStartY+i*20,n:rightPins[i]});
     }
   }
   var partCount=0;
@@ -98,6 +98,7 @@ function createCustomCompDef(providedKey,config){
       T(g,0,bodyH/2+22,name,'comp-value');
       for(var i=0;i<pins.length;i++){
         var pin=pins[i];
+        if(!pin.n)continue;
         var isLeft=pin.x<0;
         var frameX=isLeft?-bodyW/2:bodyW/2;
         L(g,frameX,pin.y,pin.x,pin.y,'comp-pin');
