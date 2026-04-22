@@ -303,14 +303,19 @@ const CD={
     }
   },
   sw:{
-    lbl:'SW',val:'SW1',hitW:100,hitH:50,
-    props:{label:{l:'Reference'},value:{l:'Name'}},
-    pins:[{x:-40,y:0,n:'A'},{x:40,y:0,n:'B'}],
+    lbl:'SW',val:'SW1',hitW:100,hitH:80,
+    props:{label:{l:'Reference'},model:{l:'Model'}},
+    pins:[{x:-40,y:0,n:'A'},{x:40,y:0,n:'B'},{x:-40,y:32,n:'+'},{x:40,y:32,n:'-'}],
     draw(g,v){
       L(g,-40,0,-14,0,'comp-pin');
       CE(g,-14,0,4,'pin-dot');CE(g,14,0,4,'pin-dot');
       LE(g,-14,0,12,-16,'comp-body');
       L(g,14,0,40,0,'comp-pin');
+      R(g,-14,20,28,24,'comp-body');
+      TA(g,-6,33,'+','comp-label');
+      TA(g,6,33,'-','comp-label');
+      L(g,-14,32,-40,32,'comp-pin');
+      L(g,14,32,40,32,'comp-pin');
       T(g,0,-22,v.label||'SW','comp-label');
     }
   },
