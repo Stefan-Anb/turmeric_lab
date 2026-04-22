@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -22,6 +22,7 @@
   </button>
   <div class="tb-sep"></div>
   <button class="tb-btn" onclick="clearAll()">CLEAR</button>
+  <button class="tb-btn" onclick="showCustomCompPanel()">CUSTOM</button>
   <button class="tb-btn" onclick="exportSVG()">SAVE</button>
   <button class="tb-btn" onclick="importSVG()">LOAD</button>
   <button class="tb-btn" onclick="zoomToFit()">
@@ -79,6 +80,7 @@
     <button class="comp-btn" onclick="selectComp('netconn')">
       <svg class="comp-prev" viewBox="-22 -13 44 26"><line x1="-22" y1="0" x2="-10" y2="0" stroke="#a8c4d8" stroke-width="1.5"/><path d="M-10,-9 L14,-9 L22,0 L14,9 L-10,9 Z" stroke="#a8c4d8" stroke-width="1.5" fill="#0f1215"/><text x="4" y="4" font-size="8" fill="#00c8ff" font-family="monospace" font-weight="bold" text-anchor="middle">NET</text></svg>Net Conn
     </button>
+    <div id="sidebar-custom-comps"></div>
     <div style="height:16px"></div>
   </div>
 
@@ -104,6 +106,36 @@
   <div id="propspanel">
     <div class="props-header">Properties</div>
     <div id="props-content"><div class="props-empty">Select a component<br>to edit its properties</div></div>
+<div id="custom-comp-section" style="display:none">
+      <div class="props-header" style="border-top:1px solid var(--border);margin-top:12px;padding-top:12px">Custom Components</div>
+      <div class="cc-select-all-row">
+        <button class="tb-btn" onclick="importCustomComp()" style="font-size:10px;padding:2px 6px;margin-right:4px">Import</button>
+        <button class="tb-btn" onclick="exportSelectedCustomComps()" style="font-size:10px;padding:2px 6px">Export</button>
+        <span style="flex:1"></span>
+        <span style="font-size:11px;color:var(--text-lo);min-width:50px;margin-right:2px">Select All</span>
+        <input type="checkbox" id="cc-select-all" onchange="toggleAllCustomComps(this.checked)" style="margin:0"/>
+      </div>
+      <div id="custom-comps-list" style="padding:4px 12px;max-height:150px;overflow-y:auto"></div>
+      <div class="props-sect">Create New</div>
+      <div class="prop-row"><div class="prop-lbl">Component Name</div>
+        <input class="prop-input" id="cc-name" type="text" placeholder="Custom"/></div>
+      <div class="prop-row"><div class="prop-lbl">Part Prefix</div>
+        <input class="prop-input" id="cc-prefix" type="text" placeholder="U" style="width:60px"/></div>
+      <div class="prop-row"><div class="prop-lbl">Left Pins</div>
+        <div id="cc-left-pins"></div>
+        <button class="tb-btn" onclick="addCustomPin('left')" style="margin-top:4px;font-size:10px;padding:4px 8px">+ Add</button></div>
+      <div class="prop-row"><div class="prop-lbl">Right Pins</div>
+        <div id="cc-right-pins"></div>
+        <button class="tb-btn" onclick="addCustomPin('right')" style="margin-top:4px;font-size:10px;padding:4px 8px">+ Add</button></div>
+      <div class="prop-row"><div class="prop-lbl">Description</div>
+        <input class="prop-input" id="cc-desc" type="text" placeholder="Description"/></div>
+      <div class="prop-row"><div class="prop-lbl">Model</div>
+        <input class="prop-input" id="cc-model" type="text" placeholder="Model"/></div>
+      <div class="prop-row" style="flex-direction:row;gap:8px;padding-top:8px">
+        <button class="tb-btn" onclick="createCustomComp()" style="flex:1">Create</button>
+      </div>
+      <input type="file" id="custom-import-file" accept=".json" style="display:none" onchange="handleCustomImport(event)"/>
+    </div>
   </div>
 </div>
 

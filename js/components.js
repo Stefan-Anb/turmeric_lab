@@ -16,13 +16,103 @@ function AH(p,x1,y1,x2,y2){
   PY(p,`${x2},${y2} ${x2-nx*10+px*4},${y2-ny*10+py*4} ${x2-nx*10-px*4},${y2-ny*10-py*4}`,'comp-body');
 }
 
-// ═══════════════════════════════════════════════════
+// ═══════════════════════════════════════════
 // COMPONENT LIBRARY — static definitions
 // All pin.x/pin.y must be multiples of GRID (20).
 // Symbols are drawn relative to (0,0) = anchor.
 // GND: pin at (0,0) top, body goes downward.
 // VCC: pin at (0,0) bottom, body goes upward.
 // ═══════════════════════════════════════════════════
+var customComponents={};
+
+function mergeCustomComponents(){
+  for(var key in customComponents){
+    var comp=customComponents[key];
+    if(comp && !comp.draw){
+      var bodyW=comp.hitW-40;
+      var bodyH=comp.hitH;
+      var name=comp._name||comp.lbl;
+      var prefix=comp.lbl;
+      comp.draw=function(g,v){
+        R(g,-bodyW/2,-bodyH/2,bodyW,bodyH,'comp-body');
+        T(g,0,-bodyH/2-8,v.label||prefix+'1','comp-label');
+        T(g,0,bodyH/2+8,name,'comp-value');
+        for(var i=0;i<comp.pins.length;i++){
+          var pin=comp.pins[i];
+          var isLeft=pin.x<0;
+          var pinY=pin.y;
+          var frameX=isLeft?-bodyW/2:bodyW/2;
+          var outX=isLeft?frameX-20:frameX+20;
+          L(g,frameX,pinY,outX,pinY,'comp-pin');
+          var textEl=el('text',{x:isLeft?frameX+8:frameX-8,y:pinY+4});
+          textEl.textContent=pin.n;
+          textEl.setAttribute('class','comp-label');
+          textEl.setAttribute('text-anchor',isLeft?'start':'end');
+          g.appendChild(textEl);
+        }
+      };
+    }
+    CD[key]=comp;
+  }
+}
+
+function createCustomCompDef(config){
+  var name=config.name||'Custom';
+  var prefix=config.prefix||'U';
+  var leftPins=config.leftPins||[];
+  var rightPins=config.rightPins||[];
+  var desc=config.description||'';
+  var model=config.model||'';
+  var key='custom_'+name.replace(/[^a-zA-Z0-9]/g,'_').toLowerCase();
+  var maxLeftLen=0, maxRightLen=0;
+  for(var i=0;i<leftPins.length;i++)if(leftPins[i]&&leftPins[i].trim())maxLeftLen=Math.max(maxLeftLen,leftPins[i].length);
+  for(var i=0;i<rightPins.length;i++)if(rightPins[i]&&rightPins[i].trim())maxRightLen=Math.max(maxRightLen,rightPins[i].length);
+  var pad=30;
+  var bodyW=Math.max(80,Math.max(maxLeftLen,maxRightLen)*9+pad*2);
+  var bodyH=Math.max(60,(Math.max(leftPins.length,rightPins.length)-1)*20+40);
+  var leftX=-bodyW/2-20;
+  var rightX=bodyW/2+20;
+  var pins=[];
+  for(var i=0;i<leftPins.length;i++){
+    if(leftPins[i]&&leftPins[i].trim()){
+      pins.push({x:-(bodyW/2+20),y:-bodyH/2+30+i*20,n:leftPins[i].trim()});
+    }
+  }
+  for(var i=0;i<rightPins.length;i++){
+    if(rightPins[i]&&rightPins[i].trim()){
+      pins.push({x:bodyW/2+20,y:-bodyH/2+30+i*20,n:rightPins[i].trim()});
+    }
+  }
+  var partCount=0;
+  for(var ckey in CD)if(CD[ckey].lbl===prefix)partCount++;
+  var def={
+    lbl:prefix,val:desc,hitW:bodyW+40,hitH:bodyH,
+    props:{label:{l:'Reference'}},
+    _desc:desc,_model:model,_name:name,
+    pins:pins,
+    draw:function(g,v){
+      R(g,-bodyW/2,-bodyH/2,bodyW,bodyH,'comp-body');
+      T(g,0,-bodyH/2-8,v.label||prefix+(partCount+1),'comp-label');
+      T(g,0,bodyH/2+8,name,'comp-value');
+      for(var i=0;i<pins.length;i++){
+        var pin=pins[i];
+        var isLeft=pin.x<0;
+        var pinY=pin.y;
+        var frameX=isLeft?-bodyW/2:bodyW/2;
+        var outX=isLeft?frameX-20:frameX+20;
+        L(g,frameX,pinY,outX,pinY,'comp-pin');
+        var textEl=el('text',{x:isLeft?frameX+8:frameX-8,y:pinY+4});
+        textEl.textContent=pin.n;
+        textEl.setAttribute('class','comp-label');
+        textEl.setAttribute('text-anchor',isLeft?'start':'end');
+        g.appendChild(textEl);
+      }
+    }
+  };
+  customComponents[key]=def;
+  return key;
+}
+
 const CD={
   resistor:{
     lbl:'R',val:'1k',hitW:100,hitH:40,

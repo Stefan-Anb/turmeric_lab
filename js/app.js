@@ -360,16 +360,25 @@ function setMode(m){
 
 function selectComp(type){
   placeRot=0;placeMirror=false;
+  mergeCustomComponents();
   S.placeType=type;setMode('place');
   document.querySelectorAll('.comp-btn').forEach(function(b){b.classList.remove('selected');});
-  event.currentTarget.classList.add('selected');
+  if(event && event.currentTarget)event.currentTarget.classList.add('selected');
   showGhost(type);
 }
 
 // ═══ GHOST ═══
 var ghostEl=null;var placeRot=0,placeMirror=false;
 function showGhost(t){
-  // If we already have a ghost for the same type, just update its transform/position
+  mergeCustomComponents();
+  if(!CD[t]){
+    console.error('Component not found in CD:',t,' Available:',Object.keys(CD).filter(k=>k.startsWith('custom')));
+    return;
+  }
+  if(typeof CD[t].draw !== 'function'){
+    console.error('Component draw is not a function:',t,CD[t]);
+    return;
+  }
   if(ghostEl && ghostEl.getAttribute('data-type')===t){
     var xf='';if(placeRot)xf+='rotate('+placeRot+')';if(placeMirror)xf+=(xf?' ':'')+'scale(-1,1)';
     var inner=ghostEl.querySelector('.ghost-inner');
@@ -383,7 +392,6 @@ function showGhost(t){
   var inner=el('g',{class:'ghost-inner'});
   var xf='';if(placeRot)xf+='rotate('+placeRot+')';if(placeMirror)xf+=(xf?' ':'')+'scale(-1,1)';
   if(xf)inner.setAttribute('transform',xf);
-  // Draw component once into the inner group; we will only update transform on subsequent rotations
   CD[t].draw(inner,{label:CD[t].lbl,value:CD[t].val});
   ghostEl.appendChild(inner);
   lyrO.appendChild(ghostEl);
@@ -1312,7 +1320,9 @@ function cleanJuncs(){
 function clearAll(){
   S.components=[];S.wires=[];S.junctions=[];S.selected=[];S.nextId=1;
   view.x=0;view.y=0;view.zoom=1;
+  customComponents={};
   cancelWire();applyView();renderAll();renderProps();
+  renderCustomCompsList();
   saveSchematic();
 }
 
@@ -1411,7 +1421,7 @@ function mirrorSelected(){
 // ===== Persistent storage (autosave/load) =====
 function saveSchematic(){
   try{
-    var state={components:S.components,wires:S.wires,junctions:S.junctions,nextId:S.nextId,view:view};
+    var state={components:S.components,wires:S.wires,junctions:S.junctions,nextId:S.nextId,view:view,customComponents:customComponents};
     localStorage.setItem('schematic_state',JSON.stringify(state));
   }catch(e){console.warn('Failed to save schematic',e);}  
 }
@@ -1427,9 +1437,14 @@ function loadSchematic(){
     S.nextId=state.nextId||1;
     S.selected=[];
     if(state.view){view.x=state.view.x||0;view.y=state.view.y||0;view.zoom=state.view.zoom||1;}
-    // initialize history from loaded state
+    if(state.customComponents){
+      customComponents=state.customComponents;
+      mergeCustomComponents();
+      renderCustomCompsList();
+
+    }
     clearHistory(); pushState();
-  }catch(e){console.warn('Failed to load schematic',e);}  
+  }catch(e){console.warn('Failed to load schematic',e);}
 }
 
 window.addEventListener('beforeunload',function(){saveSchematic();});
@@ -1496,8 +1511,224 @@ document.addEventListener('keydown',function(e){
 });
 function hint(m){document.getElementById('sb-hint').textContent=m;}
 
+function showCustomCompPanel(){
+  document.getElementById('custom-comp-section').style.display='block';
+  document.getElementById('props-content').style.display='none';
+  renderCustomCompExportList();
+  ccLeftPins=[''];
+  ccRightPins=[''];
+  renderCustomPinInputs('left');
+  renderCustomPinInputs('right');
+  document.getElementById('cc-name').value='';
+  document.getElementById('cc-prefix').value='U';
+  document.getElementById('cc-desc').value='';
+  document.getElementById('cc-model').value='';
+}
+
+function hideCustomCompPanel(){
+  document.getElementById('custom-comp-section').style.display='none';
+  document.getElementById('props-content').style.display='block';
+}
+
+// ═══ CUSTOM COMPONENT FUNCTIONS ═══
+var ccLeftPins=[];
+var ccRightPins=[];
+
+function renderCustomPinInputs(side){
+  var container=document.getElementById('cc-'+side+'-pins');
+  var pins=side==='left'?ccLeftPins:ccRightPins;
+  var html='';
+  for(var i=0;i<pins.length;i++){
+    html+='<div class="cc-pin-row"><input type="text" placeholder="Signal name" value="'+esc(pins[i])+'" onchange="updateCustomPin(\''+side+'\','+i+',this.value)"/><button class="tb-btn cc-pin-remove" onclick="removeCustomPin(\''+side+'\','+i+')">x</button></div>';
+  }
+  container.innerHTML=html;
+}
+
+function updateCustomPin(side,idx,val){
+  if(side==='left')ccLeftPins[idx]=val;
+  else ccRightPins[idx]=val;
+}
+
+function addCustomPin(side){
+  if(side==='left'){ccLeftPins.push('');renderCustomPinInputs('left');}
+  else{ccRightPins.push('');renderCustomPinInputs('right');}
+}
+
+function removeCustomPin(side,idx){
+  if(side==='left'){ccLeftPins.splice(idx,1);renderCustomPinInputs('left');}
+  else{ccRightPins.splice(idx,1);renderCustomPinInputs('right');}
+}
+
+function createCustomComp(){
+  var name=document.getElementById('cc-name').value.trim()||'Custom';
+  var prefix=document.getElementById('cc-prefix').value.trim()||'U';
+  var desc=document.getElementById('cc-desc').value.trim();
+  var model=document.getElementById('cc-model').value.trim();
+  var validLeft=ccLeftPins.filter(function(p){return p.trim();});
+  var validRight=ccRightPins.filter(function(p){return p.trim();});
+  var key='custom_'+name.replace(/[^a-zA-Z0-9]/g,'_').toLowerCase();
+  if(customComponents[key]){
+    alert('Component with name "'+name+'" already exists. Use a different name.');
+    return;
+  }
+  if(validLeft.length===0&&validRight.length===0){
+    alert('Please add at least one signal name on either side');
+    return;
+  }
+  var config={
+    name:name,
+    prefix:prefix,
+    leftPins:ccLeftPins,
+    rightPins:ccRightPins,
+    description:desc,
+    model:model
+  };
+  createCustomCompDef(config);
+  mergeCustomComponents();
+  renderCustomCompsList();
+  saveSchematic();
+  selectComp(key);
+}
+
+function renderCustomCompsList(){
+  var container=document.getElementById('custom-comps-list');
+  var sidebar=document.getElementById('sidebar-custom-comps');
+  if(container)container.innerHTML='';
+  if(sidebar)sidebar.innerHTML='<div class="grp-lbl">Custom</div>';
+  for(var key in customComponents){
+    var def=customComponents[key];
+    var row=document.createElement('div');
+    row.style.display='flex';
+    row.style.alignItems='center';
+    row.style.gap='8px';
+    row.style.padding='6px 12px';
+    row.style.borderBottom='1px solid var(--border)';
+    var delBtn=document.createElement('button');
+    delBtn.className='tb-btn';
+    delBtn.style.width='16px';
+    delBtn.style.height='16px';
+    delBtn.style.minWidth='16px';
+    delBtn.style.padding='0';
+    delBtn.style.flex='none';
+    delBtn.style.display='flex';
+    delBtn.style.alignItems='center';
+    delBtn.style.justifyContent='center';
+    delBtn.style.fontSize='9px';
+    delBtn.title='Delete';
+    delBtn.innerHTML='<span style="color:var(--text-mid)">✕</span>';
+    delBtn.onclick=function(k,el){return function(){confirmDeleteCustomComp(k,el);};}(key,delBtn);
+    var nameLbl=document.createElement('span');
+    nameLbl.style.flex='1';
+    nameLbl.style.fontSize='11px';
+    nameLbl.style.color='var(--text-hi)';
+    nameLbl.style.cursor='pointer';
+    nameLbl.textContent=def._name||def.lbl;
+    nameLbl.onclick=function(k){return function(){selectComp(k);hideCustomCompPanel();};}(key);
+    var chk=document.createElement('input');
+    chk.type='checkbox';
+    chk.value=key;
+    chk.id='cc-chk-'+key;
+    row.appendChild(delBtn);
+    row.appendChild(nameLbl);
+    row.appendChild(chk);
+    if(container)container.appendChild(row);
+    if(sidebar){
+      var sbBtn=document.createElement('button');
+      sbBtn.className='comp-btn';
+      sbBtn.innerHTML='<svg class="comp-prev" viewBox="-10 -8 20 16"><rect x="-8" y="-6" width="16" height="12" stroke="#00c8ff" stroke-width="1.5" fill="none"/><line x1="-4" y1="-3" x2="4" y2="-3" stroke="#00c8ff" stroke-width="1"/><line x1="-4" y1="3" x2="4" y2="3" stroke="#00c8ff" stroke-width="1"/></svg>'+(def._name||def.lbl);
+      sbBtn.onclick=function(k){return function(){selectComp(k);};}(key);
+      sidebar.appendChild(sbBtn);
+    }
+  }
+}
+
+var pendingDelete=null;
+function confirmDeleteCustomComp(key,btnEl){
+  if(pendingDelete===key){
+    delete customComponents[key];
+    delete CD[key];
+    pendingDelete=null;
+    renderCustomCompsList();
+    saveSchematic();
+  }else{
+    pendingDelete=key;
+    btnEl.innerHTML='<span style="color:var(--wire-sel)">✔</span>';
+    setTimeout(function(){if(pendingDelete===key){pendingDelete=null;renderCustomCompsList();}},3000);
+  }
+}
+
+function toggleAllCustomComps(select){
+  var container=document.getElementById('custom-comps-list');
+  var chks=container.querySelectorAll('input[type=checkbox]');
+  for(var i=0;i<chks.length;i++)chks[i].checked=select;
+}
+
+function exportSelectedCustomComps(){
+  var container=document.getElementById('custom-comps-list');
+  var chks=container.querySelectorAll('input[type=checkbox]:checked');
+  var data=[];
+  for(var i=0;i<chks.length;i++){
+    var key=chks[i].value;
+    if(customComponents[key]){
+      data.push({key:key,definition:customComponents[key]});
+    }
+  }
+  if(data.length===0){
+    alert('No components selected');
+    return;
+  }
+  var blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='custom_components.json';
+  a.click();
+}
+
+function importCustomComp(){
+  document.getElementById('custom-import-file').click();
+}
+
+function handleCustomImport(event){
+  var file=event.target.files[0];
+  if(!file)return;
+  var reader=new FileReader();
+  reader.onload=function(e){
+    try{
+      var data=JSON.parse(e.target.result);
+      var arr=Array.isArray(data)?data:[data];
+      for(var i=0;i<arr.length;i++){
+        var item=arr[i];
+        if(item.key&&item.definition){
+          customComponents[item.key]=item.definition;
+          CD[item.key]=item.definition;
+        }
+      }
+      renderCustomCompsList();
+      saveSchematic();
+    }catch(err){
+      alert('Failed to import: '+err.message);
+    }
+  };
+  reader.readAsText(file);
+  event.target.value='';
+}
+
+function exportCustomComp(key){
+  var def=customComponents[key];
+  if(!def)return;
+  var data={key:key,definition:def};
+  var blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=key+'.json';
+  a.click();
+}
+
+function renderCustomCompExportList(){}
+
 // ═══ INIT ═══
+mergeCustomComponents();
 loadSchematic();
 applyView();renderAll();renderProps();
-// initialize history if none
 if(undoStack.length===0){ clearHistory(); pushState(); }
+if(Object.keys(customComponents).length>0){renderCustomCompsList();}
