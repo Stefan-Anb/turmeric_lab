@@ -12,7 +12,8 @@ const lyrO=document.getElementById('lyr-overlay');
 let undoStack=[]; let redoStack=[]; const HISTORY_MAX=200; let isRestoring=false;
 
 function snapshotState(){
-  return JSON.stringify({components:S.components,wires:S.wires,junctions:S.junctions,nextId:S.nextId,view:view,selected:S.selected});
+  // View (pan/zoom) is intentionally excluded — it is not part of the schematic data.
+  return JSON.stringify({components:S.components,wires:S.wires,junctions:S.junctions,nextId:S.nextId,selected:S.selected});
 }
 
 function pushState(){
@@ -34,27 +35,29 @@ function applySnapshot(snap){
     S.wires=state.wires||[];
     S.junctions=state.junctions||[];
     S.nextId=state.nextId||1;
-    if(state.view) { view.x=state.view.x||0; view.y=state.view.y||0; view.zoom=state.view.zoom||1; }
     S.selected=state.selected||[];
-    cancelWire();applyView();renderAll();renderProps();
+    // View is NOT restored from history — pan/zoom is independent of undo/redo.
+    cancelWire();renderAll();renderProps();
   }catch(e){console.warn('applySnapshot failed',e);} finally{ isRestoring=false; }
 }
 
 function undo(){
-  if(!undoStack.length) return;
-  // Move current state to redo, restore last
+  // Need at least 2 entries: one to discard (= current state) and one to restore.
+  if(undoStack.length < 2) return;
   try{
-    const cur=snapshotState(); redoStack.push(cur);
-    const prev=undoStack.pop(); applySnapshot(prev);
-  }catch(e){console.warn('undo failed',e);}  
+    const cur=undoStack.pop(); // current state (post-last-action)
+    redoStack.push(cur);
+    applySnapshot(undoStack[undoStack.length-1]); // restore previous state
+  }catch(e){console.warn('undo failed',e);}
 }
 
 function redo(){
   if(!redoStack.length) return;
   try{
-    const cur=snapshotState(); undoStack.push(cur);
-    const next=redoStack.pop(); applySnapshot(next);
-  }catch(e){console.warn('redo failed',e);}  
+    const next=redoStack.pop();
+    undoStack.push(next);
+    applySnapshot(next);
+  }catch(e){console.warn('redo failed',e);}
 }
 
 function clearHistory(){ undoStack=[];redoStack=[]; }
@@ -697,7 +700,9 @@ svg.addEventListener('dblclick',function(e){
     finishWire(sp,null);
   }
 });
-svg.addEventListener('mouseup',function(e){
+// Use window-level mouseup so releasing the mouse outside the SVG still
+// completes any in-progress selection, drag, pan, or probe gesture.
+window.addEventListener('mouseup',function(e){
   if(panState.active&&e.button===2){
     panState.active=false;
     svg.style.cursor=S.mode==='wire'||S.mode==='place'?'crosshair':(S.mode==='probe'?'crosshair':'default');
@@ -1622,7 +1627,7 @@ function exportSVG(){
   // Embed schematic state for round-trip import
   var desc=document.createElementNS('http://www.w3.org/2000/svg','desc');
   desc.setAttribute('id','schematic-data');
-  var state={components:S.components,wires:S.wires,junctions:S.junctions,nextId:S.nextId,view:view};
+  var state={components:S.components,wires:S.wires,junctions:S.junctions,nextId:S.nextId};
   desc.textContent=JSON.stringify(state);
   clone.insertBefore(desc,st.nextSibling);
   var a=document.createElement('a');
@@ -1652,8 +1657,9 @@ function importSVG(){
         S.junctions=state.junctions||[];
         S.nextId=state.nextId||1;
         S.selected=[];
-        if(state.view){view.x=state.view.x||0;view.y=state.view.y||0;view.zoom=state.view.zoom||1;}
-        cancelWire();applyView();renderAll();renderProps();
+        // View is NOT restored from import — open with zoom-to-fit instead.
+        cancelWire();renderAll();renderProps();
+        zoomToFit();
         // reset history to the imported state
         clearHistory(); pushState();
         saveSchematic();
@@ -1696,9 +1702,10 @@ function mirrorSelected(){
 // ===== Persistent storage (autosave/load) =====
 function saveSchematic(){
   try{
-    var state={components:S.components,wires:S.wires,junctions:S.junctions,nextId:S.nextId,view:view,customComponents:customComponents};
+    // View (pan/zoom) is intentionally not saved — schematic always opens with zoom-to-fit.
+    var state={components:S.components,wires:S.wires,junctions:S.junctions,nextId:S.nextId,customComponents:customComponents};
     localStorage.setItem('schematic_state',JSON.stringify(state));
-  }catch(e){console.warn('Failed to save schematic',e);}  
+  }catch(e){console.warn('Failed to save schematic',e);}
 }
 
 function loadSchematic(){
@@ -1711,15 +1718,14 @@ function loadSchematic(){
     S.junctions=state.junctions||[];
     S.nextId=state.nextId||1;
     S.selected=[];
-    if(state.view){view.x=state.view.x||0;view.y=state.view.y||0;view.zoom=state.view.zoom||1;}
+    // View is NOT restored — the schematic will be zoom-to-fit after render.
     if(state.customComponents){
       customComponents=state.customComponents;
       mergeCustomComponents();
       renderCustomCompsList();
-
     }
     clearHistory(); pushState();
-  }catch(e){console.warn('Failed to load schematic',e);}
+  }catch(e){console.warn('Failed to load schematic',e);}  
 }
 
 window.addEventListener('beforeunload',function(){saveSchematic();});
@@ -2080,7 +2086,8 @@ function renderCustomCompExportList(){}
 // ═══ INIT ═══
 mergeCustomComponents();
 loadSchematic();
-applyView();renderAll();renderProps();
+renderAll();renderProps();
+zoomToFit();
 if(undoStack.length===0){ clearHistory(); pushState(); }
 if(Object.keys(customComponents).length>0){renderCustomCompsList();}
 
