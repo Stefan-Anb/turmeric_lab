@@ -370,12 +370,12 @@ function setMode(m){
     m==='probe'?'Click to probe net or pin \u2014 drag to probe two points':m==='select'?'Click to select \u00b7 drag to move \u00b7 hover pin to start wire':'Click to select \u00b7 drag to move \u00b7 hover pin to start wire');
 }
 
-function selectComp(type){
+function selectComp(type,ev){
   placeRot=0;placeMirror=false;
   mergeCustomComponents();
   S.placeType=type;setMode('place');
   document.querySelectorAll('.comp-btn').forEach(function(b){b.classList.remove('selected');});
-  if(event && event.currentTarget)event.currentTarget.classList.add('selected');
+  if(ev && ev.currentTarget)ev.currentTarget.classList.add('selected');
   showGhost(type);
 }
 
@@ -523,30 +523,30 @@ function handleProbeClick(pt){
   }
 }
 
-function startProbeDrag(e,pt){
+// Begin a probe drag gesture at point pt. Returns true if a probe target
+// (a pin or a named/derivable net) was found and the drag was started.
+// Shared by startProbeDrag, onWireDown and onJuncDown.
+function beginProbeDrag(pt){
   clearProbeStartHighlight();
   clearProbeHighlight();
-  
   var near=findPin(pt.x,pt.y,18);
   var isPin=(near&&near.type==='pin');
   var netName=getNetNameAt(pt.x,pt.y);
-  var hasNet=isPin||!!netName;
-  
-  if(!hasNet){
-    return;
-  }
-  
+  if(!(isPin||!!netName))return false;
   probeState.active=true;
   probeState.startX=pt.x;
   probeState.startY=pt.y;
   probeState.startNetName=netName;
   probeState.startIsPin=isPin;
   probeState.dragging=true;
-  
   showProbeStartHighlight(pt.x,pt.y,isPin);
-  
   probeDragLineEl=el('line',{x1:pt.x,y1:pt.y,x2:pt.x,y2:pt.y,class:'probe-drag-line'});
   lyrO.appendChild(probeDragLineEl);
+  return true;
+}
+
+function startProbeDrag(e,pt){
+  beginProbeDrag(pt);
 }
 
 function updateProbeDrag(pt){
@@ -772,27 +772,7 @@ function onCompDown(e,compId){
 function onWireDown(e,wid){
   if(e.button!==0)return;e.stopPropagation();
   if(S.mode==='probe'){
-    var pt=svgPt(e);
-    var near=findPin(pt.x,pt.y,18);
-    var isPin=(near&&near.type==='pin');
-    var netName=getNetNameAt(pt.x,pt.y);
-    var hasNet=isPin||!!netName;
-    
-    if(!hasNet){
-      return;
-    }
-    
-    probeState.active=true;
-    probeState.startX=pt.x;
-    probeState.startY=pt.y;
-    probeState.startNetName=netName;
-    probeState.startIsPin=isPin;
-    probeState.dragging=true;
-    
-    showProbeStartHighlight(pt.x,pt.y,isPin);
-    
-    probeDragLineEl=el('line',{x1:pt.x,y1:pt.y,x2:pt.x,y2:pt.y,class:'probe-drag-line'});
-    lyrO.appendChild(probeDragLineEl);
+    beginProbeDrag(svgPt(e));
     return;
   }
   if(S.mode==='wire'){handleWireClick(svgPt(e));return;}
@@ -811,27 +791,7 @@ function onWireDown(e,wid){
 function onJuncDown(e,jid){
   if(e.button!==0)return;e.stopPropagation();
   if(S.mode==='probe'){
-    var pt=svgPt(e);
-    var near=findPin(pt.x,pt.y,18);
-    var isPin=(near&&near.type==='pin');
-    var netName=getNetNameAt(pt.x,pt.y);
-    var hasNet=isPin||!!netName;
-    
-    if(!hasNet){
-      return;
-    }
-    
-    probeState.active=true;
-    probeState.startX=pt.x;
-    probeState.startY=pt.y;
-    probeState.startNetName=netName;
-    probeState.startIsPin=isPin;
-    probeState.dragging=true;
-    
-    showProbeStartHighlight(pt.x,pt.y,isPin);
-    
-    probeDragLineEl=el('line',{x1:pt.x,y1:pt.y,x2:pt.x,y2:pt.y,class:'probe-drag-line'});
-    lyrO.appendChild(probeDragLineEl);
+    beginProbeDrag(svgPt(e));
     return;
   }
   if(S.mode==='wire'){handleWireClick(svgPt(e));return;}
@@ -946,10 +906,26 @@ function finishWire(endPt,endConn){
 /* Net cleanup and related helpers moved to js/schematic.js (cleanupNet, pointOnSeg, etc.) */
 
 // ═══ PLACEMENT ═══
+// Next free reference number for a given SPICE prefix (e.g. 'R', 'Q', 'D').
+// Uses the highest existing suffix + 1 across all components sharing the
+// prefix, so deleting and re-placing never produces duplicate references
+// (which SPICE rejects). Diode/LED share 'D', NPN/PNP share 'Q', etc.
+function nextRefNum(prefix){
+  var max=0;
+  for(var i=0;i<S.components.length;i++){
+    var c=S.components[i];
+    var cdef=CD[c.type];
+    if(!cdef||cdef.lbl!==prefix)continue;
+    var lab=c.label||'';
+    if(lab.indexOf(prefix)!==0)continue;
+    var n=parseInt(lab.slice(prefix.length),10);
+    if(!isNaN(n)&&n>max)max=n;
+  }
+  return max+1;
+}
 function placeComp(type,sp){
   var def=CD[type];
-  var cnt=S.components.filter(function(c){return c.type===type;}).length;
-  var lbl=type==='netconn'?'NET':def.lbl+(cnt+1);
+  var lbl=type==='netconn'?'NET':def.lbl+nextRefNum(def.lbl);
   var comp={id:newId(),type:type,x:sp.x,y:sp.y,label:lbl,value:def.val,rot:placeRot,mirror:placeMirror,props:{}};
   // initialize enum defaults
   for(const[key,pd]of Object.entries(def.props||{})){
@@ -1700,10 +1676,12 @@ function mirrorSelected(){
 /* rewireComp moved to js/schematic.js */
 
 // ===== Persistent storage (autosave/load) =====
+// Bump when the persisted schema changes; loadSchematic can then migrate.
+var SCHEMA_VERSION=1;
 function saveSchematic(){
   try{
     // View (pan/zoom) is intentionally not saved — schematic always opens with zoom-to-fit.
-    var state={components:S.components,wires:S.wires,junctions:S.junctions,nextId:S.nextId,customComponents:customComponents};
+    var state={version:SCHEMA_VERSION,components:S.components,wires:S.wires,junctions:S.junctions,nextId:S.nextId,customComponents:customComponents};
     localStorage.setItem('schematic_state',JSON.stringify(state));
   }catch(e){console.warn('Failed to save schematic',e);}
 }
@@ -1713,6 +1691,9 @@ function loadSchematic(){
     var raw=localStorage.getItem('schematic_state');
     if(!raw) return;
     var state=JSON.parse(raw);
+    // Tolerate older saves (no version field) and warn on newer ones.
+    var ver=state.version||0;
+    if(ver>SCHEMA_VERSION)console.warn('Schematic saved with newer schema v'+ver+' (app supports v'+SCHEMA_VERSION+')');
     S.components=state.components||[];
     S.wires=state.wires||[];
     S.junctions=state.junctions||[];
@@ -1993,7 +1974,7 @@ function renderCustomCompsList(){
       var sbBtn=document.createElement('button');
       sbBtn.className='comp-btn';
       sbBtn.innerHTML='<svg class="comp-prev" viewBox="-10 -8 20 16"><rect x="-8" y="-6" width="16" height="12" stroke="#00c8ff" stroke-width="1.5" fill="none"/><line x1="-4" y1="-3" x2="4" y2="-3" stroke="#00c8ff" stroke-width="1"/><line x1="-4" y1="3" x2="4" y2="3" stroke="#00c8ff" stroke-width="1"/></svg>'+(def._name||def.lbl);
-      sbBtn.onclick=function(k){return function(){selectComp(k);};}(key);
+      sbBtn.onclick=function(k){return function(e){selectComp(k,e);};}(key);
       sidebar.appendChild(sbBtn);
     }
   }

@@ -38,50 +38,50 @@
 <div id="main">
   <div id="sidebar">
     <div class="grp-lbl">Passive</div>
-    <button class="comp-btn" onclick="selectComp('resistor')">
+    <button class="comp-btn" onclick="selectComp('resistor',event)">
       <svg class="comp-prev" viewBox="-22 -12 44 24"><line x1="-22" y1="0" x2="-14" y2="0" stroke="#a8c4d8" stroke-width="1.5"/><rect x="-14" y="-7" width="28" height="14" stroke="#a8c4d8" stroke-width="1.5" fill="#0f1215"/><line x1="14" y1="0" x2="22" y2="0" stroke="#a8c4d8" stroke-width="1.5"/></svg>Resistor
     </button>
-    <button class="comp-btn" onclick="selectComp('capacitor')">
+    <button class="comp-btn" onclick="selectComp('capacitor',event)">
       <svg class="comp-prev" viewBox="-22 -14 44 28"><line x1="-22" y1="0" x2="-5" y2="0" stroke="#a8c4d8" stroke-width="1.5"/><line x1="-5" y1="-12" x2="-5" y2="12" stroke="#a8c4d8" stroke-width="2.5"/><line x1="5" y1="-12" x2="5" y2="12" stroke="#a8c4d8" stroke-width="2.5"/><line x1="5" y1="0" x2="22" y2="0" stroke="#a8c4d8" stroke-width="1.5"/></svg>Capacitor
     </button>
-    <button class="comp-btn" onclick="selectComp('inductor')">
+    <button class="comp-btn" onclick="selectComp('inductor',event)">
       <svg class="comp-prev" viewBox="-22 -12 44 24"><line x1="-22" y1="0" x2="-14" y2="0" stroke="#a8c4d8" stroke-width="1.5"/><path d="M-14,0 Q-10,-10 -6,0 Q-2,-10 2,0 Q6,-10 10,0 Q14,-10 18,0" stroke="#a8c4d8" stroke-width="1.5" fill="none"/><line x1="18" y1="0" x2="22" y2="0" stroke="#a8c4d8" stroke-width="1.5"/></svg>Inductor
     </button>
     <div class="grp-lbl">Semiconductors</div>
-    <button class="comp-btn" onclick="selectComp('diode')">
+    <button class="comp-btn" onclick="selectComp('diode',event)">
       <svg class="comp-prev" viewBox="-22 -12 44 24"><line x1="-22" y1="0" x2="-10" y2="0" stroke="#a8c4d8" stroke-width="1.5"/><polygon points="-10,0 10,-10 10,10" stroke="#a8c4d8" stroke-width="1.5" fill="#0f1215"/><line x1="10" y1="-10" x2="10" y2="10" stroke="#a8c4d8" stroke-width="2"/><line x1="10" y1="0" x2="22" y2="0" stroke="#a8c4d8" stroke-width="1.5"/></svg>Diode
     </button>
-    <button class="comp-btn" onclick="selectComp('led')">
+    <button class="comp-btn" onclick="selectComp('led',event)">
       <svg class="comp-prev" viewBox="-22 -14 44 28"><line x1="-22" y1="0" x2="-10" y2="0" stroke="#a8c4d8" stroke-width="1.5"/><polygon points="-10,0 10,-10 10,10" stroke="#ff9040" stroke-width="1.5" fill="#1a0800"/><line x1="10" y1="-10" x2="10" y2="10" stroke="#ff9040" stroke-width="2"/><line x1="10" y1="0" x2="22" y2="0" stroke="#a8c4d8" stroke-width="1.5"/></svg>LED
     </button>
-    <button class="comp-btn" onclick="selectComp('npn')">
+    <button class="comp-btn" onclick="selectComp('npn',event)">
       <svg class="comp-prev" viewBox="-22 -16 44 32"><line x1="-22" y1="0" x2="-4" y2="0" stroke="#a8c4d8" stroke-width="1.5"/><line x1="-4" y1="-10" x2="-4" y2="10" stroke="#a8c4d8" stroke-width="2"/><line x1="-4" y1="-7" x2="13" y2="-14" stroke="#a8c4d8" stroke-width="1.5"/><line x1="-4" y1="7" x2="13" y2="14" stroke="#a8c4d8" stroke-width="1.5"/><polygon points="8,11 13,14 6,16" fill="#a8c4d8"/></svg>NPN BJT
     </button>
-    <button class="comp-btn" onclick="selectComp('pnp')">
+    <button class="comp-btn" onclick="selectComp('pnp',event)">
       <svg class="comp-prev" viewBox="-22 -16 44 32"><line x1="-22" y1="0" x2="-4" y2="0" stroke="#a8c4d8" stroke-width="1.5"/><line x1="-4" y1="-10" x2="-4" y2="10" stroke="#a8c4d8" stroke-width="2"/><line x1="-4" y1="-7" x2="13" y2="-14" stroke="#a8c4d8" stroke-width="1.5"/><line x1="-4" y1="7" x2="13" y2="14" stroke="#a8c4d8" stroke-width="1.5"/><polygon points="3,-5 -4,-7 3,-11" fill="#a8c4d8"/></svg>PNP BJT
     </button>
-    <button class="comp-btn" onclick="selectComp('nmos')">
+    <button class="comp-btn" onclick="selectComp('nmos',event)">
       <svg class="comp-prev" viewBox="-22 -16 44 32"><line x1="-22" y1="0" x2="-10" y2="0" stroke="#a8c4d8" stroke-width="1.5"/><line x1="-10" y1="-12" x2="-10" y2="12" stroke="#a8c4d8" stroke-width="2"/><line x1="-4" y1="-10" x2="-4" y2="-3" stroke="#a8c4d8" stroke-width="1.5"/><line x1="-4" y1="-1" x2="-4" y2="3" stroke="#a8c4d8" stroke-width="1.5"/><line x1="-4" y1="5" x2="-4" y2="10" stroke="#a8c4d8" stroke-width="1.5"/><line x1="-4" y1="-8" x2="10" y2="-8" stroke="#a8c4d8" stroke-width="1.5"/><line x1="-4" y1="8" x2="10" y2="8" stroke="#a8c4d8" stroke-width="1.5"/><line x1="-4" y1="0" x2="3" y2="0" stroke="#a8c4d8" stroke-width="1.5"/><polygon points="3,0 -1,-3 -1,3" fill="#a8c4d8"/><line x1="10" y1="-8" x2="10" y2="8" stroke="#a8c4d8" stroke-width="1.5"/><line x1="10" y1="-16" x2="10" y2="-8" stroke="#a8c4d8" stroke-width="1.5"/><line x1="10" y1="8" x2="10" y2="16" stroke="#a8c4d8" stroke-width="1.5"/></svg>NMOS
     </button>
     <div class="grp-lbl">Sources</div>
-    <button class="comp-btn" onclick="selectComp('source')">
+    <button class="comp-btn" onclick="selectComp('source',event)">
       <svg class="comp-prev" viewBox="-22 -14 44 28"><circle cx="0" cy="0" r="12" stroke="#a8c4d8" stroke-width="1.5" fill="#0f1215"/><line x1="-12" y1="0" x2="-22" y2="0" stroke="#a8c4d8" stroke-width="1.5"/><line x1="12" y1="0" x2="22" y2="0" stroke="#a8c4d8" stroke-width="1.5"/><text x="0" y="4" font-size="9" fill="#00c8ff" font-family="monospace" text-anchor="middle">SRC</text></svg>Source
     </button>
     <!-- old DC/AC source buttons removed; use unified Source above -->
-    <button class="comp-btn" onclick="selectComp('gnd')">
+    <button class="comp-btn" onclick="selectComp('gnd',event)">
       <svg class="comp-prev" viewBox="-14 -6 28 22"><line x1="0" y1="-6" x2="0" y2="4" stroke="#a8c4d8" stroke-width="1.5"/><line x1="-12" y1="4" x2="12" y2="4" stroke="#a8c4d8" stroke-width="2"/><line x1="-7" y1="9" x2="7" y2="9" stroke="#a8c4d8" stroke-width="1.5"/><line x1="-2" y1="14" x2="2" y2="14" stroke="#a8c4d8" stroke-width="1"/></svg>Ground
     </button>
-    <button class="comp-btn" onclick="selectComp('vcc')">
+    <button class="comp-btn" onclick="selectComp('vcc',event)">
       <svg class="comp-prev" viewBox="-14 -14 28 20"><line x1="0" y1="6" x2="0" y2="-4" stroke="#a8c4d8" stroke-width="1.5"/><line x1="-12" y1="-4" x2="12" y2="-4" stroke="#a8c4d8" stroke-width="2"/><text x="0" y="-10" font-size="8" fill="#00c8ff" font-family="monospace" text-anchor="middle">VCC</text></svg>VCC Rail
     </button>
     <div class="grp-lbl">ICs / Other</div>
-    <button class="comp-btn" onclick="selectComp('opamp')">
+    <button class="comp-btn" onclick="selectComp('opamp',event)">
       <svg class="comp-prev" viewBox="-22 -16 44 32"><polygon points="-18,-13 -18,13 18,0" stroke="#a8c4d8" stroke-width="1.5" fill="#0f1215"/><line x1="-22" y1="-7" x2="-18" y2="-7" stroke="#a8c4d8" stroke-width="1.5"/><line x1="-22" y1="7" x2="-18" y2="7" stroke="#a8c4d8" stroke-width="1.5"/><line x1="18" y1="0" x2="22" y2="0" stroke="#a8c4d8" stroke-width="1.5"/><text x="-12" y="-3" font-size="7" fill="#a8c4d8">-</text><text x="-13" y="11" font-size="7" fill="#a8c4d8">+</text></svg>Op-Amp
     </button>
-    <button class="comp-btn" onclick="selectComp('sw')">
+    <button class="comp-btn" onclick="selectComp('sw',event)">
       <svg class="comp-prev" viewBox="-22 -12 44 24"><line x1="-22" y1="0" x2="-12" y2="0" stroke="#a8c4d8" stroke-width="1.5"/><circle cx="-12" cy="0" r="3" fill="#a8c4d8"/><circle cx="12" cy="0" r="3" fill="#a8c4d8"/><line x1="-12" y1="0" x2="10" y2="-11" stroke="#a8c4d8" stroke-width="1.5"/><line x1="12" y1="0" x2="22" y2="0" stroke="#a8c4d8" stroke-width="1.5"/></svg>Switch
     </button>
-    <button class="comp-btn" onclick="selectComp('netconn')">
+    <button class="comp-btn" onclick="selectComp('netconn',event)">
       <svg class="comp-prev" viewBox="-22 -13 44 26"><line x1="-22" y1="0" x2="-10" y2="0" stroke="#a8c4d8" stroke-width="1.5"/><path d="M-10,-9 L14,-9 L22,0 L14,9 L-10,9 Z" stroke="#a8c4d8" stroke-width="1.5" fill="#0f1215"/><text x="4" y="4" font-size="8" fill="#00c8ff" font-family="monospace" font-weight="bold" text-anchor="middle">NET</text></svg>Net Conn
     </button>
     <div id="sidebar-custom-comps"></div>
@@ -141,8 +141,6 @@
           <button id="cc-create-btn" class="tb-btn" onclick="applyCustomComp()" style="flex:1">Apply</button>
         </div>
       </div>
-      <input type="file" id="custom-import-file" accept=".json" style="display:none" onchange="handleCustomImport(event)"/>
-    </div>
       <input type="file" id="custom-import-file" accept=".json" style="display:none" onchange="handleCustomImport(event)"/>
     </div>
   </div>

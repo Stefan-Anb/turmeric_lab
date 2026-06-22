@@ -25,6 +25,11 @@ function AH(p,x1,y1,x2,y2){
 // ═══════════════════════════════════════════════════
 var customComponents={};
 
+// Custom components are persisted via JSON.stringify (localStorage / export),
+// which silently drops their `draw` function. mergeCustomComponents rebuilds a
+// generic box-drawing `draw` from the stored geometry whenever it is missing,
+// so a round-tripped definition stays renderable. This is why custom defs can
+// be saved as plain data without losing their symbol.
 function mergeCustomComponents(){
   for(var key in customComponents){
     var comp=customComponents[key];
