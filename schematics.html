@@ -30,7 +30,7 @@
   <button class="tb-btn" onclick="exportSVG()">SAVE</button>
   <button class="tb-btn" onclick="importSVG()">LOAD</button>
   <button class="tb-btn" onclick="showNetlist()">NETLIST</button>
-  <button class="tb-btn" onclick="showSim()">SIMULATE</button>
+  <button class="tb-btn" id="btn-sim" onclick="toggleSimView()">SIMULATE</button>
   <button class="tb-btn" onclick="zoomToFit()">
     <svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 4V1h3M8 1h3v3M11 8v3H8M4 11H1V8" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>ZOOM FIT
   </button>
@@ -91,22 +91,33 @@
   </div>
 
   <div id="canvas-wrap">
-    <svg id="schematic-svg" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <pattern id="smallGrid" width="20" height="20" patternUnits="userSpaceOnUse">
-          <path d="M20 0L0 0 0 20" fill="none" stroke="#111820" stroke-width="0.5"/>
-        </pattern>
-        <pattern id="grid" width="100" height="100" patternUnits="userSpaceOnUse">
-          <rect width="100" height="100" fill="url(#smallGrid)"/>
-          <path d="M100 0L0 0 0 100" fill="none" stroke="#151c22" stroke-width="1"/>
-        </pattern>
-      </defs>
-      <rect id="grid-bg" width="100%" height="100%" fill="url(#grid)"/>
-      <g id="lyr-wires"></g>
-      <g id="lyr-comps"></g>
-      <g id="lyr-junc"></g>
-      <g id="lyr-overlay"></g>
-    </svg>
+    <div id="schematic-pane">
+      <svg id="schematic-svg" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <pattern id="smallGrid" width="20" height="20" patternUnits="userSpaceOnUse">
+            <path d="M20 0L0 0 0 20" fill="none" stroke="#111820" stroke-width="0.5"/>
+          </pattern>
+          <pattern id="grid" width="100" height="100" patternUnits="userSpaceOnUse">
+            <rect width="100" height="100" fill="url(#smallGrid)"/>
+            <path d="M100 0L0 0 0 100" fill="none" stroke="#151c22" stroke-width="1"/>
+          </pattern>
+        </defs>
+        <rect id="grid-bg" width="100%" height="100%" fill="url(#grid)"/>
+        <g id="lyr-wires"></g>
+        <g id="lyr-comps"></g>
+        <g id="lyr-junc"></g>
+        <g id="lyr-overlay"></g>
+      </svg>
+    </div>
+    <div id="sim-divider" style="display:none" title="Drag to resize the plot"></div>
+    <div id="sim-pane" style="display:none">
+      <div id="sim-pane-header">
+        <span class="sim-pane-title">Simulation Plot</span>
+        <span class="sim-pane-hint">drag on the plot to zoom · double-click to reset</span>
+        <button class="modal-close" onclick="toggleSimView()" title="Close simulation">&times;</button>
+      </div>
+      <div id="sim-plot" class="sim-plot"></div>
+    </div>
   </div>
 
   <div id="propspanel">
@@ -145,6 +156,28 @@
       </div>
       <input type="file" id="custom-import-file" accept=".json" style="display:none" onchange="handleCustomImport(event)"/>
     </div>
+    <div id="sim-settings" style="display:none">
+      <div class="props-header">NGSpice Simulation</div>
+      <div class="sim-row">
+        <label class="sim-label">Analysis directive(s)</label>
+        <textarea id="sim-directives" class="sim-directives" spellcheck="false">.tran 10u 5m</textarea>
+        <div class="sim-hint-text"><code>.tran 10u 5m</code> · <code>.op</code> · <code>.ac dec 20 1 1Meg</code> · <code>.dc V1 0 5 0.1</code>. Add custom <code>.model</code> cards here too.</div>
+      </div>
+      <div class="sim-row">
+        <label class="sim-label">Plotted nets <span class="sim-sub">(probe mode P: click toggles, drag = differential)</span></label>
+        <div id="sim-probe-list" class="sim-probe-list"></div>
+        <button class="tb-btn" style="margin-top:6px;font-size:10px;padding:3px 8px;align-self:flex-start" onclick="clearProbes()">Clear selection</button>
+      </div>
+      <div class="sim-row" style="flex-direction:row;align-items:center;gap:10px;flex-wrap:wrap">
+        <button id="sim-run-btn" class="props-apply" style="width:auto;margin:0;padding:8px 18px" onclick="runSimulation()">Run</button>
+        <span id="sim-status" class="sim-status">Idle.</span>
+      </div>
+      <div class="sim-row">
+        <label class="sim-check"><input type="checkbox" id="sim-raw-mode" onchange="onRawModeChange()"> Raw mode <span class="sim-sub">(keep all vectors, pick afterward)</span></label>
+      </div>
+      <div id="sim-raw-panel" class="sim-raw-panel" style="display:none"></div>
+      <details class="sim-log-wrap"><summary>NGSpice log / netlist</summary><pre id="sim-log" class="sim-log"></pre></details>
+    </div>
   </div>
 </div>
 
@@ -161,32 +194,6 @@
     <div class="modal-header">SPICE Netlist<button class="modal-close" onclick="closeNetlist()">&times;</button></div>
     <textarea id="netlist-text" readonly></textarea>
     <button class="tb-btn" onclick="copyNetlist()">Copy to Clipboard</button>
-  </div>
-</div>
-
-<div id="sim-modal" class="modal" style="display:none">
-  <div class="modal-content sim-modal-content">
-    <div class="modal-header">NGSpice Simulation<button class="modal-close" onclick="closeSim()">&times;</button></div>
-    <div class="sim-body">
-      <div class="sim-row">
-        <label class="sim-label">Analysis directive(s)</label>
-        <textarea id="sim-directives" class="sim-directives" spellcheck="false">.tran 10u 5m</textarea>
-        <div class="sim-hint-text">e.g. <code>.tran 10u 5m</code> · <code>.op</code> · <code>.ac dec 20 1 1Meg</code> · <code>.dc V1 0 5 0.1</code>. Add custom <code>.model</code> cards here too.</div>
-      </div>
-      <div class="sim-row">
-        <label class="sim-label">Plotted nets <span class="sim-sub">(probe mode → click a net/pin to toggle)</span></label>
-        <div id="sim-probe-list" class="sim-probe-list"></div>
-        <button class="tb-btn" style="margin-top:6px;font-size:10px;padding:3px 8px" onclick="clearProbes()">Clear selection</button>
-      </div>
-      <div class="sim-row">
-        <button id="sim-run-btn" class="props-apply" style="width:auto;margin:0;padding:8px 18px" onclick="runSimulation()">Run Simulation</button>
-        <span id="sim-status" class="sim-status">Idle.</span>
-        <label class="sim-check"><input type="checkbox" id="sim-raw-mode" onchange="onRawModeChange()"> Raw mode <span class="sim-sub">(keep all vectors, pick what to plot afterward)</span></label>
-      </div>
-      <div id="sim-raw-panel" class="sim-raw-panel" style="display:none"></div>
-      <div id="sim-plot" class="sim-plot"></div>
-      <details class="sim-log-wrap"><summary>NGSpice log / netlist</summary><pre id="sim-log" class="sim-log"></pre></details>
-    </div>
   </div>
 </div>
 

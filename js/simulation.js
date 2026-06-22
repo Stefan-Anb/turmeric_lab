@@ -18,6 +18,8 @@ var simStarting=null;     // in-flight start() promise (de-dupes concurrent star
 var simPlot=null;         // current uPlot instance
 var simLastResult=null;   // last result, for re-plot when probe selection changes
 var simRawSelection={};    // raw mode: map of vector-name(lowercase) -> true to plot
+var simRawInit=false;      // whether the raw picker has been prefilled for the current result
+var simViewActive=false;   // split-screen simulation view open?
 
 function simLog(msg,isErr){
   var elx=document.getElementById('sim-log');
@@ -82,6 +84,7 @@ function runSimulation(){
       return;
     }
     simLastResult=result;
+    simRawInit=false; // fresh result: let the raw picker prefill once
     simStatus('Done: '+result.numPoints+' point(s), '+result.numVariables+' variable(s), '+result.dataType+'.');
     plotResult(result);
   }).catch(function(err){
@@ -173,10 +176,9 @@ function plotResult(result){
   for(var k=0;k<ser.names.length;k++){
     series.push({label:ser.names[k]+(isComplex?' |mag|':''),stroke:palette[k%palette.length],width:2});
   }
-  var rect=container.getBoundingClientRect();
   var opts={
-    width:Math.max(560,Math.floor(rect.width)||560),
-    height:360,
+    width:Math.max(120,container.clientWidth||600),
+    height:Math.max(60,container.clientHeight||320),
     series:series,
     scales:{x:{time:false,distr:isFreq?3:1}},
     cursor:{drag:{x:true,y:true,uni:8}},
@@ -198,12 +200,16 @@ function renderRawPanel(result){
   var panel=document.getElementById('sim-raw-panel');
   if(!panel)return;
   if(!getRawMode()||!result){panel.style.display='none';panel.innerHTML='';return;}
-  // Prefill selection with all node voltages on first populate.
-  if(Object.keys(simRawSelection).length===0){
+  // Prefill with all node voltages exactly once per result/mode-entry. After
+  // that we respect the user's choices — including deselecting everything
+  // (no auto re-selection of defaults).
+  if(!simRawInit){
+    simRawSelection={};
     for(var i=1;i<result.data.length;i++){
       var vv=result.data[i],nm=String(vv.name).toLowerCase();
       if((vv.type==='voltage')||nm.indexOf('v(')===0)simRawSelection[nm]=true;
     }
+    simRawInit=true;
   }
   var html='<div class="sim-label">Raw vectors <span class="sim-sub">tick to plot</span></div><div class="sim-raw-grid">';
   for(var j=1;j<result.data.length;j++){
@@ -222,9 +228,10 @@ function renderRawPanel(result){
   });
 }
 
-// Toggled by the "raw mode" checkbox in the modal.
+// Toggled by the "raw mode" checkbox.
 function onRawModeChange(){
-  if(!getRawMode())simRawSelection={}; // reset so probe mode prefills fresh next time
+  simRawInit=false;                    // re-prefill the picker for the current result
+  if(!getRawMode())simRawSelection={};
   if(simLastResult)plotResult(simLastResult);
 }
 
@@ -315,16 +322,68 @@ function removeProbe(idx){
   _afterProbeChange();
 }
 
-// ═══ MODAL ═══
-function showSim(){
-  var modal=document.getElementById('sim-modal');
-  if(!modal)return;
-  renderProbeList();
-  modal.style.display='flex';
-  modal.onclick=function(e){if(e.target===modal)closeSim();};
-  if(simLastResult)plotResult(simLastResult);
+// ═══ SPLIT-SCREEN VIEW ═══
+// The plot lives in a bottom pane that splits the canvas vertically; the
+// simulation settings live in the properties panel. SIMULATE toggles both.
+function toggleSimView(){ setSimView(!simViewActive); }
+
+function setSimView(on){
+  simViewActive=!!on;
+  var pane=document.getElementById('sim-pane');
+  var divider=document.getElementById('sim-divider');
+  var settings=document.getElementById('sim-settings');
+  var btn=document.getElementById('btn-sim');
+  if(pane)pane.style.display=simViewActive?'flex':'none';
+  if(divider)divider.style.display=simViewActive?'block':'none';
+  if(btn)btn.classList.toggle('active',simViewActive);
+  if(settings){
+    if(simViewActive){
+      // show sim settings, hide the other properties sections
+      document.getElementById('props-content').style.display='none';
+      var cc=document.getElementById('custom-comp-section');if(cc)cc.style.display='none';
+      settings.style.display='block';
+      renderProbeList();
+    }else{
+      settings.style.display='none';
+      renderProps(); // restore normal properties view
+    }
+  }
+  if(typeof applyView==='function')applyView();  // SVG viewBox tracks the new pane size
+  if(simViewActive&&simLastResult)plotResult(simLastResult);
 }
-function closeSim(){
-  var modal=document.getElementById('sim-modal');
-  if(modal)modal.style.display='none';
+
+// Drag the horizontal divider to resize the plot pane.
+(function initSimDivider(){
+  function attach(){
+    var divider=document.getElementById('sim-divider');
+    var wrap=document.getElementById('canvas-wrap');
+    var pane=document.getElementById('sim-pane');
+    if(!divider||!wrap||!pane)return;
+    var dragging=false;
+    divider.addEventListener('mousedown',function(e){
+      dragging=true;divider.classList.add('dragging');
+      document.body.style.cursor='row-resize';e.preventDefault();
+    });
+    document.addEventListener('mousemove',function(e){
+      if(!dragging)return;
+      var r=wrap.getBoundingClientRect();
+      var h=r.bottom-e.clientY-3;            // pane height from cursor to bottom
+      h=Math.max(120,Math.min(r.height-120,h));
+      pane.style.height=h+'px';
+      if(typeof applyView==='function')applyView();
+      if(simPlot)resizeSimPlot();
+    });
+    document.addEventListener('mouseup',function(){
+      if(!dragging)return;
+      dragging=false;divider.classList.remove('dragging');document.body.style.cursor='';
+      if(simLastResult)plotResult(simLastResult);
+    });
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',attach);else attach();
+})();
+
+function resizeSimPlot(){
+  var c=document.getElementById('sim-plot');
+  if(simPlot&&c)simPlot.setSize({width:Math.max(120,c.clientWidth),height:Math.max(60,c.clientHeight)});
 }
+window.addEventListener('resize',function(){ if(simViewActive&&simPlot)resizeSimPlot(); });

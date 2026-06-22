@@ -461,11 +461,25 @@ Vorteile:
 ## 6. Einbindung von NGSpice als WebAssembly
 
 > **Implementierungsstatus (2026-06-22): umgesetzt.** Das Feature ist live in
-> [js/simulation.js](js/simulation.js), dem Toolbar-Button `SIMULATE` und dem
-> Sim-Modal in [schematics.html](schematics.html). Verifiziert im Browser: die
-> WASM-Engine lädt, eine `.tran`-Simulation einer RC-Schaltung liefert
-> `time / v(in) / v(out) / i(v1)`, und der interaktive uPlot-Chart wird anhand
-> der Probe-Auswahl gefiltert gezeichnet.
+> [js/simulation.js](js/simulation.js), dem Toolbar-Button `SIMULATE` und
+> [schematics.html](schematics.html). Verifiziert im Browser: die WASM-Engine
+> lädt, eine `.tran`-Simulation einer RC-Schaltung liefert `time / v(n001) /
+> v(n002) / i(vsrc1)`, und der interaktive uPlot-Chart wird anhand der
+> Probe-Auswahl gefiltert gezeichnet.
+>
+> - **UI: vertikaler Split-Screen** statt Modal. `SIMULATE` (toggelt
+>   `setSimView`) öffnet ein Plot-Pane unter dem Schaltplan, getrennt durch einen
+>   vertikal verschiebbaren Divider (`#sim-divider`, Drag passt die Pane-Höhe an,
+>   `applyView`/`uPlot.setSize` folgen). Die Simulationseinstellungen
+>   (Direktiven, Probe-Liste, Run, Raw-Modus, Log) liegen im Properties-Panel
+>   (`#sim-settings`).
+> - **Drag-to-Zoom-Vorschau:** uPlots Auswahlrechteck (`.u-select`) ist per CSS
+>   sichtbar gemacht (Akzentfarbe), da die Voreinstellung auf dunklem Grund
+>   unsichtbar war.
+> - **Raw-Picker:** Vorbelegung erfolgt nur einmal pro Lauf (`simRawInit`).
+>   Abwählen aller Signale bleibt bestehen (kein automatisches Reselect).
+> - **Dev-Server:** `.claude/serve.py` (threaded, `Cache-Control: no-store`)
+>   verhindert die Browser-Cache-Probleme des nackten `python -m http.server`.
 >
 > - **Engine:** `eecircuit-engine@1.7.0` (ngspice als WASM), lazy via
 >   dynamischem `import()` von `esm.sh` beim ersten Lauf.

@@ -259,6 +259,14 @@ function updateStatus(){
 
 // ═══ PROPERTIES PANEL ═══
 function renderProps(){
+  // While the split-screen simulation view is open, the properties panel is
+  // dedicated to the simulation settings; don't clobber it.
+  if(typeof simViewActive!=='undefined' && simViewActive){
+    var ss=document.getElementById('sim-settings'); if(ss)ss.style.display='block';
+    document.getElementById('props-content').style.display='none';
+    var ccs=document.getElementById('custom-comp-section'); if(ccs)ccs.style.display='none';
+    return;
+  }
   document.getElementById('custom-comp-section').style.display='none';
   document.getElementById('custom-comp-edit').style.display='none';
   document.getElementById('props-content').style.display='block';
