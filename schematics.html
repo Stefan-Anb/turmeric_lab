@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SchematicForge</title>
 <link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.min.css">
 </head>
 <body>
 
@@ -29,6 +30,7 @@
   <button class="tb-btn" onclick="exportSVG()">SAVE</button>
   <button class="tb-btn" onclick="importSVG()">LOAD</button>
   <button class="tb-btn" onclick="showNetlist()">NETLIST</button>
+  <button class="tb-btn" onclick="showSim()">SIMULATE</button>
   <button class="tb-btn" onclick="zoomToFit()">
     <svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 4V1h3M8 1h3v3M11 8v3H8M4 11H1V8" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>ZOOM FIT
   </button>
@@ -162,9 +164,37 @@
   </div>
 </div>
 
+<div id="sim-modal" class="modal" style="display:none">
+  <div class="modal-content sim-modal-content">
+    <div class="modal-header">NGSpice Simulation<button class="modal-close" onclick="closeSim()">&times;</button></div>
+    <div class="sim-body">
+      <div class="sim-row">
+        <label class="sim-label">Analysis directive(s)</label>
+        <textarea id="sim-directives" class="sim-directives" spellcheck="false">.tran 10u 5m</textarea>
+        <div class="sim-hint-text">e.g. <code>.tran 10u 5m</code> · <code>.op</code> · <code>.ac dec 20 1 1Meg</code> · <code>.dc V1 0 5 0.1</code>. Add custom <code>.model</code> cards here too.</div>
+      </div>
+      <div class="sim-row">
+        <label class="sim-label">Plotted nets <span class="sim-sub">(probe mode → click a net/pin to toggle)</span></label>
+        <div id="sim-probe-list" class="sim-probe-list"></div>
+        <button class="tb-btn" style="margin-top:6px;font-size:10px;padding:3px 8px" onclick="clearProbes()">Clear selection</button>
+      </div>
+      <div class="sim-row">
+        <button id="sim-run-btn" class="props-apply" style="width:auto;margin:0;padding:8px 18px" onclick="runSimulation()">Run Simulation</button>
+        <span id="sim-status" class="sim-status">Idle.</span>
+        <label class="sim-check"><input type="checkbox" id="sim-raw-mode" onchange="onRawModeChange()"> Raw mode <span class="sim-sub">(keep all vectors, pick what to plot afterward)</span></label>
+      </div>
+      <div id="sim-raw-panel" class="sim-raw-panel" style="display:none"></div>
+      <div id="sim-plot" class="sim-plot"></div>
+      <details class="sim-log-wrap"><summary>NGSpice log / netlist</summary><pre id="sim-log" class="sim-log"></pre></details>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.iife.min.js"></script>
 <script src="js/components.js"></script>
 <script src="js/schematic.js"></script>
 <script src="js/netlist.js"></script>
 <script src="js/app.js"></script>
+<script src="js/simulation.js"></script>
 </body>
 </html>

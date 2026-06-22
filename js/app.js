@@ -182,10 +182,7 @@ function renderComps(){
         ev.stopPropagation(); ev.preventDefault();
         var absX=comp.x+tpx,absY=comp.y+tpy;
         if(S.mode==='probe'){
-          var def=CD[comp.type];
-          var pin=def.pins[i];
-          console.log('PROBE PIN: Component='+comp.type+' ('+(comp.label||comp.id)+'), Pin='+pin.n);
-          hint('Probed: '+comp.type+'.'+pin.n);
+          toggleProbeAt(absX,absY);
         } else if(S.wire.drawing){handleWireClick({x:absX,y:absY});}
         else{startWireFromPin(absX,absY,{type:'pin',compId:comp.id,pinIdx:i});}
       };})(comp,tp.x,tp.y,i));
@@ -561,53 +558,17 @@ function endProbeDrag(pt){
   if(probeDragLineEl){probeDragLineEl.remove();probeDragLineEl=null;}
   clearProbeStartHighlight();
   clearProbeHighlight();
-  
-  var startNetName=probeState.startNetName;
-  var startIsPin=probeState.startIsPin;
-  var endNear=findPin(pt.x,pt.y,18);
-  var endIsPin=(endNear&&endNear.type==='pin');
-  var endNetName=getNetNameAt(pt.x,pt.y);
-  
-  if(startIsPin&&endIsPin){
-    var startNear=findPin(probeState.startX,probeState.startY,18);
-    var startComp=S.components.find(function(c){return c.id===startNear.compId;});
-    var endComp=S.components.find(function(c){return c.id===endNear.compId;});
-    if(startComp&&endComp){
-      var startDef=CD[startComp.type];
-      var endDef=CD[endComp.type];
-      var startPin=startDef.pins[startNear.pinIdx];
-      var endPin=endDef.pins[endNear.pinIdx];
-      console.log('PROBE: '+startComp.type+'.'+startPin.n+' -> '+endComp.type+'.'+endPin.n);
-      hint('Probed: '+startComp.type+'.'+startPin.n+' -> '+endComp.type+'.'+endPin.n);
-    }
-  } else if(startIsPin&&!endIsPin){
-    var startNear=findPin(probeState.startX,probeState.startY,18);
-    var startComp=S.components.find(function(c){return c.id===startNear.compId;});
-    var startDef=CD[startComp.type];
-    var startPin=startDef.pins[startNear.pinIdx];
-    if(endNetName&&typeof endNetName==='object'&&endNetName.comp){
-      console.log('PROBE: '+startComp.type+'.'+startPin.n+' -> '+endNetName.compName+'.'+endNetName.pinName);
-      hint('Probed: '+startComp.type+'.'+startPin.n+' -> '+endNetName.compName+'.'+endNetName.pinName);
-    } else {
-      console.log('PROBE: '+startComp.type+'.'+startPin.n+' -> '+(endNetName||'NOTHING'));
-      hint('Probed: '+startComp.type+'.'+startPin.n+' -> '+(endNetName||'NOTHING'));
-    }
-  } else if(!startIsPin&&endIsPin){
-    var endComp=S.components.find(function(c){return c.id===endNear.compId;});
-    var endDef=CD[endComp.type];
-    var endPin=endDef.pins[endNear.pinIdx];
-    if(startNetName&&typeof startNetName==='object'&&startNetName.comp){
-      console.log('PROBE: '+startNetName.compName+'.'+startNetName.pinName+' -> '+endComp.type+'.'+endPin.n);
-      hint('Probed: '+startNetName.compName+'.'+startNetName.pinName+' -> '+endComp.type+'.'+endPin.n);
-    } else {
-      console.log('PROBE: '+(startNetName||'NOTHING')+' -> '+endComp.type+'.'+endPin.n);
-      hint('Probed: '+(startNetName||'NOTHING')+' -> '+endComp.type+'.'+endPin.n);
-    }
-  } else {
-    console.log('PROBE: '+(startNetName||'NOTHING')+' -> '+(endNetName||'NOTHING'));
-    hint('Probed: '+(startNetName||'NOTHING')+' -> '+(endNetName||'NOTHING'));
+
+  // A click (no meaningful drag) selects/deselects the net for plotting.
+  if(Math.abs(pt.x-probeState.startX)<6 && Math.abs(pt.y-probeState.startY)<6){
+    toggleProbeAt(probeState.startX,probeState.startY);
+    probeState.active=false;probeState.dragging=false;
+    return;
   }
-  
+
+  // A real drag from net A to net B adds a differential probe V(B)-V(A).
+  addDiffProbe(probeState.startX,probeState.startY,pt.x,pt.y);
+
   probeState.active=false;
   probeState.dragging=false;
 }
@@ -1574,7 +1535,7 @@ function cleanJuncs(){
   S.junctions=S.junctions.filter(function(j){return j.wires.length>0;});
 }
 function clearAll(){
-  S.components=[];S.wires=[];S.junctions=[];S.selected=[];S.nextId=1;
+  S.components=[];S.wires=[];S.junctions=[];S.selected=[];S.nextId=1;S.probes=[];
   view.x=0;view.y=0;view.zoom=1;
   customComponents={};
   cancelWire();applyView();renderAll();renderProps();

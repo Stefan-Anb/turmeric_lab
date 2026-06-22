@@ -240,7 +240,15 @@ SPICE-Präfix erneut vorangestellt: `'Q'+ref` → `QQ1`, `'M'+ref` → `MM1`,
 bereits mit R/C/L beginnt. Diese Inkonsistenz ist die Hauptmotivation für die
 generische Überarbeitung (Abschnitt 5).
 
-**#2 (kritisch) Default-Modelle werden nie verwendet.**
+**#2 (teilweise behoben) Default-Modelle werden nie verwendet.**
+> Update 2026-06-22: Die `.model`-Karten werden jetzt nur noch emittiert, wenn
+> ein Bauteil der jeweiligen Klasse vorhanden ist (siehe
+> [netlist.js](js/netlist.js), `present`-Flags). Damit ist der Fall „leeres
+> Value-Feld → `*_default`" simulierbar. Der unten beschriebene Kern (Value-Feld
+> doppelt als Anzeige-Teilenummer und Modellname) bleibt bis zum generischen
+> Generator aus Kapitel 5 bestehen.
+
+
 Für npn/pnp/nmos/diode lautet die Modellwahl
 `model = c.value || '<...>_default'`. `c.value` ist aber durch den
 Platzierungs-Default **immer gesetzt** (`2N2222`, `2N7000`, `1N4148`, `RED`
@@ -450,7 +458,51 @@ Vorteile:
 
 ---
 
-## 6. Konzept: Einbindung von NGSpice als WebAssembly
+## 6. Einbindung von NGSpice als WebAssembly
+
+> **Implementierungsstatus (2026-06-22): umgesetzt.** Das Feature ist live in
+> [js/simulation.js](js/simulation.js), dem Toolbar-Button `SIMULATE` und dem
+> Sim-Modal in [schematics.html](schematics.html). Verifiziert im Browser: die
+> WASM-Engine lädt, eine `.tran`-Simulation einer RC-Schaltung liefert
+> `time / v(in) / v(out) / i(v1)`, und der interaktive uPlot-Chart wird anhand
+> der Probe-Auswahl gefiltert gezeichnet.
+>
+> - **Engine:** `eecircuit-engine@1.7.0` (ngspice als WASM), lazy via
+>   dynamischem `import()` von `esm.sh` beim ersten Lauf.
+> - **Plot:** `uPlot@1.6.32` (≈50 KB, Zoom per Aufziehen, Pan, Live-Cursor,
+>   klickbare Legende), eingebunden per CDN-`<script>`/`<link>`.
+> - **Netzauswahl:** Im Probe-Modus (`P`) togglet ein **Klick** auf Netz oder Pin
+>   eine einendige Spannung `V(netz)`; ein **Drag** von Netz A nach Netz B legt
+>   eine **Differenzmessung** `V(B)-V(A)` an (degradiert zu einendig, wenn ein
+>   Ende Masse/ungültig ist). `S.probes` hält Objekte `{kind:'V',net}` bzw.
+>   `{kind:'Vd',p,n}`. Geplottet werden nur die gewählten Signale, sonst alle
+>   Knotenspannungen. `.op`/Einzelpunkt-Ergebnisse als Wertetabelle, `.ac`
+>   (komplex) als Betrag mit logarithmischer x-Achse.
+> - **Raw-Modus (Checkbox):** Hält alle Vektoren des Laufs vor und blendet einen
+>   Vektor-Picker (Checkboxen je Signal) ein; die Plot-Auswahl erfolgt dann
+>   nachträglich unabhängig von der Canvas-Probe-Auswahl.
+> - **Default-Modelle bedarfsgerecht:** Es werden nur `.model`-Karten der
+>   tatsächlich platzierten Bauteilklassen emittiert (siehe 3.2 #2).
+> - **Direktiven:** Textfeld im Modal (`.tran`/`.op`/`.ac`/`.dc`); hier lassen
+>   sich auch zusätzliche `.model`-Karten ergänzen. Vollständige Netzliste =
+>   `generateNetlist()` + Direktiven + `.end`.
+>
+> **Bekannte Einschränkungen / nächste Schritte:**
+> 1. **Online-Abhängigkeit:** Engine und uPlot kommen beim ersten Lauf vom CDN.
+>    Für Offline-Betrieb sollten beide ins Repo vendoriert werden.
+> 2. **Main-Thread:** Die Simulation läuft im UI-Thread. Für lange
+>    Transienten sollte die Engine in einen (Module-)Web-Worker ausgelagert
+>    werden (siehe Architekturskizze unten).
+> 3. **Default-Modelle (Kapitel 3.2 #2):** Frisch platzierte Transistoren/Dioden
+>    referenzieren Teilenummern (`2N2222`, `RED` ...) ohne passende `.model`-Karte
+>    und scheitern daher in der Simulation, bis der Nutzer entweder das Value-Feld
+>    leert (nutzt dann `*_default`) oder eine `.model`-Karte ins Direktivenfeld
+>    schreibt. Die saubere Lösung ist der generische Generator aus Kapitel 5.
+> 4. **Probe-Namensbindung:** Probes werden als Netzname zum Klickzeitpunkt
+>    gespeichert. Ändert sich danach die Topologie, kann ein temporärer Name
+>    (`n001` ...) abweichen; dann erneut proben.
+
+### 6.0 Ursprüngliches Konzept (zur Referenz)
 
 ### 6.1 Verfügbare Bausteine (Stand 2026)
 

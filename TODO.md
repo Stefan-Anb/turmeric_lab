@@ -1,6 +1,6 @@
 [x] Copy & Paste
 [x] Mehrfachselektion und Verschieben / Copy+Paste
-- Historie (Ctrl+Z / Ctrl+Y) -> Bugfixing needed
+[x] Historie (Ctrl+Z / Ctrl+Y) -> Bugfixing needed
 [x] Spice Modelle in Bauteile hinterlegen
 [x] Custom IC
 - Diverse neue Bauteile erzeugen
