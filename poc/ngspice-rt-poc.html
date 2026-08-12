@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ngspice WASM Echtzeit-PoC (RC-Filter, externe Sinusquelle)</title>
+<style>
+  body{font-family:system-ui,Segoe UI,Arial,sans-serif;margin:0;background:#0e151b;color:#cdd9e5;}
+  header{padding:14px 18px;background:#13202b;border-bottom:1px solid #1d2b36;}
+  h1{font-size:16px;margin:0 0 4px;}
+  .sub{font-size:12px;color:#7a92a8;}
+  main{padding:18px;max-width:900px;}
+  .row{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;margin-bottom:14px;}
+  label{display:flex;flex-direction:column;font-size:12px;color:#9fb3c4;gap:4px;}
+  input{background:#0b1218;border:1px solid #243441;color:#e6eef5;border-radius:5px;padding:6px 8px;font-size:13px;width:150px;}
+  button{background:#1c6feb;border:none;color:#fff;border-radius:6px;padding:9px 18px;font-size:13px;cursor:pointer;}
+  button:disabled{background:#2a3a48;cursor:default;}
+  .netlist{background:#0b1218;border:1px solid #243441;border-radius:6px;padding:10px 12px;white-space:pre;font-family:ui-monospace,Consolas,monospace;font-size:12px;color:#9fe6c0;margin-bottom:14px;}
+  #status{font-size:13px;margin:8px 0;color:#ffd040;}
+  #out{background:#0b1218;border:1px solid #243441;border-radius:6px;padding:10px 12px;height:340px;overflow:auto;white-space:pre;font-family:ui-monospace,Consolas,monospace;font-size:12px;line-height:1.45;}
+  #log{margin-top:12px;color:#7a92a8;font-size:11px;white-space:pre-wrap;max-height:120px;overflow:auto;}
+  .note{font-size:12px;color:#9fb3c4;background:#13202b;border:1px solid #1d2b36;border-radius:6px;padding:10px 12px;margin-bottom:14px;}
+  code{color:#9fe6c0;}
+</style>
+</head>
+<body>
+<header>
+  <h1>ngspice-WASM Echtzeit-PoC</h1>
+  <div class="sub">RC-Tiefpass mit extern per JavaScript vorgegebener Sinusspannung. Werte werden pro Zeitschritt textuell ausgegeben.</div>
+</header>
+<main>
+
+  <div class="note">
+    <b>Voraussetzung:</b> Die Dateien <code>spice-shared.mjs</code> und <code>spice-shared.wasm</code>
+    aus dem GitHub-Action-Artifact müssen neben dieser HTML-Datei liegen (oder Pfad unten anpassen).
+    Diese Seite muss über <b>http(s)</b> geladen werden, nicht per <code>file://</code>
+    (ES-Module + WASM + Worker). Z.B. im Ordner: <code>python -m http.server</code> und dann
+    <code>http://localhost:8000/ngspice-rt-poc.html</code> öffnen.
+  </div>
+
+  <div class="netlist" id="netlist-view"></div>
+
+  <div class="row">
+    <label>WASM-Modul (.mjs)
+      <input id="mjs" value="./spice-shared.mjs">
+    </label>
+    <label>Amplitude [V]
+      <input id="amp" type="number" value="1" step="0.1">
+    </label>
+    <label>Frequenz [Hz]
+      <input id="freq" type="number" value="1000" step="50">
+    </label>
+    <label>Ausgabe jede N-te Stützstelle
+      <input id="every" type="number" value="5" step="1" min="1">
+    </label>
+    <button id="run">Simulation starten</button>
+  </div>
+
+  <div id="status">Bereit.</div>
+  <div id="out"></div>
+  <div id="log"></div>
+
+</main>
+
+<!-- ════════════════════════════════════════════════════════════════════
+     WORKER: laeuft in eigenem Thread, damit die blockierende ngspice-
+     "run"-Schleife das UI nicht einfriert und die Werte tatsaechlich in
+     Echtzeit (pro Zeitschritt) ans Hauptfenster gestreamt werden koennen.
+     ════════════════════════════════════════════════════════════════════ -->
+<script id="worker-src" type="text/js-worker">
+let m = null;
+let AMP = 1, FREQ = 1000, EVERY = 1;
+let stepCount = 0;
+const TWO_PI = Math.PI * 2;
+
+const post = (o) => self.postMessage(o);
+
+self.onmessage = async (e) => {
+  const d = e.data;
+  if (d.type === 'run') {
+    AMP = d.amp; FREQ = d.freq; EVERY = Math.max(1, d.every | 0);
+    stepCount = 0;
+    try { await runSim(d.mjsUrl, d.netlist); }
+    catch (err) { post({ type: 'error', msg: String(err && err.stack || err) }); }
+  }
+};
+
+async function runSim(mjsUrl, netlist) {
+  post({ type: 'status', msg: 'Lade WASM-Modul …' });
+  const mod = await import(mjsUrl);
+  const Module = mod.default || mod.Module;
+  m = await Module();
+
+  post({ type: 'status', msg: 'Registriere Callbacks …' });
+
+  // --- SendChar: ngspice-Logausgabe -------------------------------------
+  const cbSendChar = m.addFunction((strPtr /*, id, user */) => {
+    post({ type: 'log', msg: m.UTF8ToString(strPtr) });
+    return 0;
+  }, 'iiii');
+
+  // --- ControlledExit ---------------------------------------------------
+  const cbExit = m.addFunction((status /*, immediate, quit, id, user */) => {
+    post({ type: 'log', msg: '[ngspice exit] status=' + status });
+    return 0;
+  }, 'iiiiii');
+
+  // --- SendInitData: hier nicht benoetigt (Namen kommen aus SendData) ---
+  const cbInit = m.addFunction(() => 0, 'iiii');
+
+  // --- SendData: feuert pro akzeptiertem Zeitschritt --------------------
+  //   pvecvaluesall: veccount@0 (i32), vecindex@4 (i32), vecsa@8 (ptr)
+  //   pvecvalues:    name@0 (char*),   creal@8 (double), cimag@16 (double)
+  const cbData = m.addFunction((pAll /*, count, id, user */) => {
+    const veccount = m.getValue(pAll, 'i32');
+    const vecsa = m.getValue(pAll + 8, 'i32');
+    const row = {};
+    for (let i = 0; i < veccount; i++) {
+      const pv = m.getValue(vecsa + i * 4, 'i32');
+      const name = m.UTF8ToString(m.getValue(pv, 'i32'));
+      row[name] = m.getValue(pv + 8, 'double');   // Realteil reicht (transient)
+    }
+    stepCount++;
+    if (stepCount % EVERY === 0) post({ type: 'data', step: stepCount, row });
+    return 0;
+  }, 'iiiii');
+
+  // --- GetVSRCData: liefert den Wert der externen Quelle pro Zeitschritt -
+  //   Signatur: int (double* ret, double time, char* name, int id, void* user)
+  const cbVSRC = m.addFunction((retPtr, time /*, namePtr, id, user */) => {
+    const v = AMP * Math.sin(TWO_PI * FREQ * time);
+    m.setValue(retPtr, v, 'double');
+    return 0;
+  }, 'iidiii');
+
+  // ngSpice_Init(SendChar, SendStat, ControlledExit, SendData, SendInitData, BGThreadRunning, user)
+  m.ccall('ngSpice_Init', 'number',
+    ['number','number','number','number','number','number','number'],
+    [cbSendChar, 0, cbExit, cbData, cbInit, 0, 0]);
+
+  // ngSpice_Init_Sync(GetVSRCData, GetISRCData, GetSyncData, int* ident, user)
+  m.ccall('ngSpice_Init_Sync', 'number',
+    ['number','number','number','number','number'],
+    [cbVSRC, 0, 0, 0, 0]);
+
+  const cmd = (s) => m.ccall('ngSpice_Command', 'number', ['string'], [s]);
+
+  // Netzliste ins virtuelle FS schreiben und laden (robust, kein char**-Marshalling).
+  post({ type: 'status', msg: 'Lade Netzliste …' });
+  m.FS.writeFile('/rc.cir', netlist);
+  cmd('source /rc.cir');
+
+  post({ type: 'status', msg: 'Simulation läuft …' });
+  cmd('run');                       // blockiert hier, SendData streamt waehrenddessen
+  post({ type: 'done', steps: stepCount });
+}
+</script>
+
+<!-- ════════════════════════════════════════════════════════════════════
+     HAUPTFENSTER: UI, Worker-Steuerung, Echtzeit-Ausgabe
+     ════════════════════════════════════════════════════════════════════ -->
+<script>
+const NETLIST = [
+  '* RC-Tiefpass, externe Sinusquelle (PoC)',
+  'vin in 0 dc 0 external',
+  'r1 in out 1k',
+  'c1 out 0 100n',
+  '.tran 10u 5m',
+  '.end',
+  ''
+].join('\n');
+
+document.getElementById('netlist-view').textContent = NETLIST;
+
+const $ = (id) => document.getElementById(id);
+const outEl = $('out'), statusEl = $('status'), logEl = $('log');
+const runBtn = $('run');
+
+let worker = null;
+const MAX_LINES = 2000;
+let lineBuf = [];
+
+function setStatus(s){ statusEl.textContent = s; }
+function addLog(s){ logEl.textContent += s + '\n'; logEl.scrollTop = logEl.scrollHeight; }
+function fmt(x){ return (x === undefined || x === null) ? '   -   ' : x.toExponential(4); }
+
+function appendRow(step, row){
+  // Zeit (Skalenvektor heisst "time"). ngspice liefert SendData-Vektornamen
+  // als nackte Knotennamen ("in", "out"), NICHT als "v(in)"/"v(out)" - die
+  // V(...)-Schreibweise ist nur eine Anzeigekonvention von print/plot bzw.
+  // der .raw-Datei, keine interne Vektorbezeichnung.
+  const t = row['time'];
+  const vin = row['in'];
+  const vout = row['out'];
+  const tms = (t !== undefined) ? (t * 1e3).toFixed(4) : '   -   ';
+  lineBuf.push(
+    '#' + String(step).padStart(5) +
+    '   t=' + tms + ' ms' +
+    '   V(in)=' + fmt(vin) +
+    '   V(out)=' + fmt(vout)
+  );
+  if (lineBuf.length > MAX_LINES) lineBuf = lineBuf.slice(-MAX_LINES);
+}
+
+// DOM gedrosselt aktualisieren (nicht bei jeder Nachricht), sonst ueberrollt
+// der Nachrichtenstrom das Rendering.
+let pending = false;
+function scheduleFlush(){
+  if (pending) return;
+  pending = true;
+  requestAnimationFrame(() => {
+    pending = false;
+    outEl.textContent = lineBuf.join('\n');
+    outEl.scrollTop = outEl.scrollHeight;
+  });
+}
+
+function makeWorker(){
+  const src = document.getElementById('worker-src').textContent;
+  const blob = new Blob([src], { type: 'text/javascript' });
+  const w = new Worker(URL.createObjectURL(blob), { type: 'module' });
+  w.onmessage = (e) => {
+    const d = e.data;
+    switch (d.type) {
+      case 'status': setStatus(d.msg); break;
+      case 'log':    addLog(d.msg); break;
+      case 'data':   appendRow(d.step, d.row); scheduleFlush(); break;
+      case 'done':
+        setStatus('Fertig: ' + d.steps + ' Zeitschritt(e) empfangen.');
+        scheduleFlush();
+        runBtn.disabled = false;
+        break;
+      case 'error':
+        setStatus('Fehler (siehe Log unten).');
+        addLog('[ERROR] ' + d.msg);
+        runBtn.disabled = false;
+        break;
+    }
+  };
+  w.onerror = (err) => {
+    setStatus('Worker-Fehler (siehe Log).');
+    addLog('[WORKER ERROR] ' + (err.message || err.filename + ':' + err.lineno));
+    runBtn.disabled = false;
+  };
+  return w;
+}
+
+runBtn.addEventListener('click', () => {
+  runBtn.disabled = true;
+  lineBuf = []; outEl.textContent = ''; logEl.textContent = '';
+  setStatus('Starte …');
+
+  const mjsUrl = new URL($('mjs').value.trim(), location.href).href;
+  const amp = parseFloat($('amp').value) || 0;
+  const freq = parseFloat($('freq').value) || 0;
+  const every = parseInt($('every').value, 10) || 1;
+
+  if (!worker) worker = makeWorker();
+  worker.postMessage({ type: 'run', mjsUrl, amp, freq, every, netlist: NETLIST });
+});
+</script>
+</body>
+</html>

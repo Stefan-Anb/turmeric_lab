@@ -6,6 +6,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": [".claude/serve.py", "8765"],
       "port": 8765
+    },
+    {
+      "name": "ngspice-poc",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8000", "--directory", "poc"],
+      "port": 8000
     }
   ]
 }

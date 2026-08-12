@@ -1,0 +1,102 @@
+# Baut ngspice mit der Shared-Library-Schnittstelle (--with-ngshared) nach
+# WebAssembly und exportiert die fuer den Echtzeit-PoC benoetigten
+# C-Funktionen (ngSpice_Init, ngSpice_Init_Sync, ngSpice_Command, ...).
+#
+# Spiegelt exakt die Schritte aus
+# .github/workflows/build-ngspice-wasm.yml, damit lokaler und CI-Build
+# identisch sind. Details/Hintergrund: POC-ECHTZEIT-NGSPICE.md.
+#
+# Build:
+#   docker build -f poc/Dockerfile.ngspice-wasm \
+#     --build-arg NGSPICE_REF=ngspice-44.2 \
+#     --build-arg EMSDK_VERSION=3.1.61 \
+#     -t ngspice-wasm-shared poc
+#
+# Artefakte extrahieren (siehe auch build-ngspice-wasm.ps1):
+#   docker create --name ngspice-wasm-extract ngspice-wasm-shared bash
+#   docker cp ngspice-wasm-extract:/wasm-out ./poc/wasm-out
+#   docker rm ngspice-wasm-extract
+
+FROM emscripten/emsdk:3.1.61 AS build
+
+ARG NGSPICE_REF=ngspice-44.2
+ARG EMSDK_VERSION=3.1.61
+
+# Emscripten-Version fixieren, falls das Basisimage abweicht/aktualisiert wurde.
+RUN emsdk install ${EMSDK_VERSION} && emsdk activate ${EMSDK_VERSION}
+
+# Build-Werkzeuge fuer autogen/configure (Lexer, Parser, Autotools).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    autoconf automake libtool bison flex gperf git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /work
+
+# ngspice-Quelle vom GitHub-Mirror (gleiche Quelle wie eelab-dev / die CI).
+RUN git clone --depth 1 --branch "${NGSPICE_REF}" \
+    https://github.com/danchitnis/ngspice-sf-mirror ngspice
+
+# Konfiguration: --with-ngshared aktiviert ngspice's eigene
+# Shared-Library-Schnittstelle (SendData, Init_Sync, ...). WICHTIG:
+# --enable-shared=no NICHT setzen. --with-ngshared traegt intern selbst
+# "-shared" in CFLAGS ein (via AC_SUBST([STATIC],[-shared]) in
+# configure.ac, fuer jede kompilierte Datei). Erzwingt man zusaetzlich
+# --enable-shared=no, widersprechen sich beide Einstellungen: libtool
+# bricht im Compile-Modus mit "cannot build a shared library" ab -
+# sichtbar wird davon nur der Folgefehler eines echten, unabhaengigen
+# Libtool-Tippfehlers ("func__fatal_error: command not found" statt
+# "func_fatal_error"), was die eigentliche Fehlermeldung unlesbar macht
+# (siehe https://lists.gnu.org/archive/html/bug-libtool/2016-06/msg00001.html).
+# Verifiziert per manuellem Build (2026-08-12): ohne --enable-shared=no
+# kompiliert und linkt ngspice sauber durch.
+WORKDIR /work/ngspice
+RUN ./autogen.sh
+WORKDIR /work/ngspice/release
+RUN emconfigure ../configure \
+    --with-ngshared \
+    --disable-debug --disable-openmp \
+    --disable-xspice --disable-osdi \
+    --without-x --with-readline=no
+
+# ngspice linkt mit --with-ngshared selbst schon per "emcc -shared" zu
+# einem vollstaendigen WASM-Modul (src/.libs/libngspice.so.X.Y.Z - trotz
+# .so-Namensendung ein fertiges WASM-Binary, kein ELF). Das ist der
+# Input fuer unseren eigenen finalen emcc-Link (naechster Schritt), der
+# die Shared-API-Funktionen gezielt exportiert. Es gibt bewusst kein
+# libngspice.a: Ohne --enable-shared=no deklariert ngspice's Makefile
+# nur ein LTLIBRARIES-Ziel (die .so), keinen separaten .a-Archivschritt.
+RUN emmake make -j"$(nproc)"
+
+# Finaler Link: das bereits von ngspice gelinkte WASM-Modul erneut durch
+# emcc schicken, um MODULARIZE/EXPORT_ES6 und die schlanke
+# EXPORTED_FUNCTIONS-Liste fuer den Browser zu erzwingen.
+RUN mkdir -p /wasm-out && \
+    ARCHIVE="$(find . -path '*/.libs/libngspice.so.*.*.*' | head -n1)" && \
+    if [ -z "$ARCHIVE" ]; then echo "libngspice.so.X.Y.Z nicht gefunden" >&2; exit 1; fi && \
+    echo "Linke $ARCHIVE" && \
+    emcc "$ARCHIVE" -O2 \
+      -s ASYNCIFY=1 \
+      -s ALLOW_MEMORY_GROWTH=1 \
+      -s ALLOW_TABLE_GROWTH=1 \
+      -s MODULARIZE=1 -s EXPORT_ES6=1 \
+      -s ENVIRONMENT="web,worker" \
+      -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","addFunction","removeFunction","FS","UTF8ToString","stringToUTF8","getValue","setValue","HEAPF64"]' \
+      -s EXPORTED_FUNCTIONS='["_ngSpice_Init","_ngSpice_Init_Sync","_ngSpice_Command","_ngSpice_Circ","_ngGet_Vec_Info","_ngSpice_CurPlot","_ngSpice_AllVecs","_ngSpice_running","_malloc","_free"]' \
+      -o /wasm-out/spice-shared.mjs
+
+# Sanity-Check, dass die Shared-Symbole tatsaechlich exportiert sind UND
+# funktionieren (echte .op-Analyse). Als eigenstaendige .js-Datei statt
+# eingebettetem "node -e '...'": eine fruehere Version dieses Tests hatte die
+# Netzliste als "node -e" String durch mehrfach verschachtelte
+# Shell-Quotierung uebergeben - dabei wurden die \n-Escapes NICHT zu echten
+# Zeilenumbruechen (Single-Quotes in Dockerfile-RUN interpretieren keine
+# Backslash-Escapes), wodurch ngspice die gesamte Netzliste als eine einzige
+# Zeile las ("Warning: Empty netlist!"). Die separate .js-Datei umgeht das
+# Problem vollstaendig. Details: POC-ECHTZEIT-NGSPICE.md, Abschnitt 8.3.
+COPY smoketest.js /smoketest.js
+RUN node /smoketest.js /wasm-out/spice-shared.mjs /wasm-out/spice-shared.wasm
+
+# Bewusst eine einzige Stage (kein "FROM scratch"-Endimage): das emsdk-Basis-
+# image bringt bash mit, wodurch `docker create` fuer die Artefakt-Extraktion
+# (siehe build-ngspice-wasm.ps1) einen gueltigen Default-Befehl vorfindet.
+# Fuer einen PoC ist die dadurch groessere Image-Groesse unerheblich.
