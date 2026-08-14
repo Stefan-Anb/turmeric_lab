@@ -42,7 +42,7 @@ body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);displ
 #sim-pane{flex-shrink:0;height:320px;min-height:120px;display:flex;flex-direction:column;background:var(--bg-deep);border-top:1px solid var(--border);overflow:hidden;}
 #sim-pane-header{display:flex;align-items:center;gap:12px;padding:5px 10px;border-bottom:1px solid var(--border);background:var(--bg-panel);flex-shrink:0;}
 .sim-pane-title{font-size:10px;font-weight:700;letter-spacing:2px;color:var(--accent);text-transform:uppercase;}
-.sim-pane-hint{font-size:11px;color:var(--text-lo);flex:1;}
+.sim-pane-hint{font-size:11px;color:var(--text-lo);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 #sim-pane-header .modal-close{font-size:18px;}
 
 #propspanel{width:280px;min-width:280px;background:var(--bg-panel);border-left:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;overflow-y:auto;position:relative;}
@@ -92,6 +92,12 @@ body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);displ
 .probe-highlight{fill:#ff904018;stroke:#ff9040;stroke-width:2;pointer-events:none;}
 .probe-highlight.pin{fill:#00c8ff30;stroke:#00c8ff;stroke-width:2.5;}
 .probe-drag-line{stroke:#ff9040;stroke-width:2.5;stroke-dasharray:6 3;pointer-events:none;}
+/* current probe marker (probe mode, hovering a device pin) */
+.probe-current-marker{pointer-events:none;}
+.probe-highlight.current{fill:#ffd04022;stroke:var(--node-color);stroke-width:2.5;}
+.probe-current-arrow{stroke:var(--node-color);stroke-width:2.5;}
+.probe-current-head{fill:var(--node-color);stroke:none;}
+.probe-current-tag{fill:var(--node-color);font-family:'Share Tech Mono',monospace;font-size:14px;paint-order:stroke;stroke:#0a0c0e;stroke-width:3px;}
 .ghost{opacity:.35;pointer-events:none;}
 .wire-net-lbl{fill:var(--accent);font-family:'Share Tech Mono',monospace;font-size:18px;pointer-events:none;}
 
@@ -159,3 +165,45 @@ body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);displ
 .sim-raw-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:4px 12px;margin-top:6px;}
 .sim-raw-item{display:flex;align-items:center;gap:6px;font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--text-hi);cursor:pointer;}
 .sim-raw-item input{accent-color:var(--accent);}
+
+/* ═══ SIMULATION SETTINGS: analysis configurator ═══ */
+.sim-settings-header{display:flex;align-items:center;justify-content:space-between;}
+.sim-settings-header .modal-close{font-size:18px;}
+.sim-select{background:var(--bg-card);border:1px solid var(--border);border-radius:3px;color:var(--text-hi);font-family:'Rajdhani',sans-serif;font-size:12px;font-weight:600;padding:5px 6px;outline:none;width:100%;}
+.sim-select:focus{border-color:var(--accent);}
+.sim-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:6px 8px;}
+.sim-field{display:flex;flex-direction:column;gap:3px;margin-top:6px;}
+.sim-field label{font-size:10px;color:var(--text-lo);letter-spacing:.5px;text-transform:uppercase;}
+.sim-field input,.sim-field select{background:var(--bg-card);border:1px solid var(--border);border-radius:3px;color:var(--text-hi);font-family:'Share Tech Mono',monospace;font-size:12px;padding:4px 6px;outline:none;width:100%;}
+.sim-field input:focus,.sim-field select:focus{border-color:var(--accent);}
+.sim-field-hint{font-size:10px;color:var(--text-lo);}
+#sim-directive-preview.sim-preview-empty{color:var(--text-lo);border-style:dashed;}
+.sim-chip.sim-chip-i{background:#ffd04014;border-color:#8a6a00;color:var(--node-color);}
+.sim-chip.sim-chip-i button{color:var(--node-color);}
+
+/* ═══ SIMULATION SETTINGS: user formulas ═══ */
+.sim-formula-list{display:flex;flex-direction:column;gap:5px;}
+.sim-formula{display:flex;align-items:center;gap:5px;flex-wrap:wrap;}
+.sim-formula input[type=checkbox]{accent-color:var(--accent);flex:none;}
+.sim-formula input[type=text]{background:var(--bg-card);border:1px solid var(--border);border-radius:3px;color:var(--text-hi);font-family:'Share Tech Mono',monospace;font-size:11px;padding:3px 5px;outline:none;min-width:0;}
+.sim-formula input[type=text]:focus{border-color:var(--accent);}
+.sim-formula .sim-f-name{width:64px;flex:none;}
+.sim-formula .sim-f-expr{flex:1;}
+.sim-formula button{background:none;border:none;color:var(--text-mid);cursor:pointer;font-size:14px;line-height:1;padding:0 2px;flex:none;}
+.sim-formula button:hover{color:var(--accent2);}
+.sim-formula.has-error input.sim-f-expr{border-color:var(--accent2);}
+.sim-f-error{flex-basis:100%;font-size:10px;color:var(--accent2);font-family:'Share Tech Mono',monospace;}
+
+/* ═══ PLOT: fit buttons and value tooltip ═══ */
+.sim-fit-btn{background:var(--bg-card);border:1px solid var(--border);border-radius:3px;color:var(--text-mid);font-family:'Rajdhani',sans-serif;font-size:10px;font-weight:700;letter-spacing:1px;padding:3px 8px;cursor:pointer;transition:all .15s;flex:none;}
+.sim-fit-btn:hover{border-color:var(--accent);color:var(--accent);background:#00c8ff12;}
+.sim-tooltip{position:absolute;z-index:20;pointer-events:none;background:#0a0c0eee;border:1px solid var(--border-hi);border-radius:3px;padding:5px 7px;font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--text-hi);white-space:nowrap;box-shadow:0 2px 10px #000a;}
+.sim-tip-x{color:var(--text-mid);border-bottom:1px solid var(--border);margin-bottom:3px;padding-bottom:3px;}
+.sim-tip-row{display:flex;align-items:center;gap:6px;}
+.sim-tip-dot{width:8px;height:8px;border-radius:2px;flex:none;}
+.sim-tip-lbl{color:var(--text-mid);}
+.sim-tip-val{margin-left:auto;color:var(--text-hi);}
+
+/* ═══ SIDEBAR: drag & drop placement ═══ */
+.comp-btn[draggable=true]{cursor:grab;}
+.comp-btn[draggable=true]:active{cursor:grabbing;}

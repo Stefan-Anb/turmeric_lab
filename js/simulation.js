@@ -19,7 +19,84 @@ var simPlot=null;         // current uPlot instance
 var simLastResult=null;   // last result, for re-plot when probe selection changes
 var simRawSelection={};    // raw mode: map of vector-name(lowercase) -> true to plot
 var simRawInit=false;      // whether the raw picker has been prefilled for the current result
-var simViewActive=false;   // split-screen simulation view open?
+var simViewActive=false;   // split-screen plot pane open?
+var simPanelOpen=false;    // simulation settings shown in the properties sidebar?
+
+// Analysis configuration (GUI-built .tran / .dc directive) and user formulas.
+// Both are persisted separately from the schematic so they survive a reload.
+var simAnalysis={
+  type:'tran',
+  tran:{tstep:'10u',tstop:'5m',tstart:'',tmax:'',uic:false},
+  dc:{src:'',start:'0',stop:'5',step:'0.1',use2:false,src2:'',start2:'0',stop2:'5',step2:'1'}
+};
+var simFormulas=[];        // [{name,expr,on}]
+
+function loadSimSettings(){
+  try{
+    var raw=localStorage.getItem('sim_settings');
+    if(!raw)return;
+    var st=JSON.parse(raw);
+    if(st.analysis){
+      simAnalysis.type=st.analysis.type||simAnalysis.type;
+      if(st.analysis.tran)for(var k in st.analysis.tran)simAnalysis.tran[k]=st.analysis.tran[k];
+      if(st.analysis.dc)for(var k2 in st.analysis.dc)simAnalysis.dc[k2]=st.analysis.dc[k2];
+    }
+    if(Array.isArray(st.formulas))simFormulas=st.formulas;
+    if(typeof st.directives==='string'){
+      var d=document.getElementById('sim-directives');
+      if(d)d.value=st.directives;
+    }
+  }catch(e){console.warn('sim settings load failed',e);}
+}
+function saveSimSettings(){
+  try{
+    var d=document.getElementById('sim-directives');
+    localStorage.setItem('sim_settings',JSON.stringify({
+      analysis:simAnalysis,formulas:simFormulas,directives:d?d.value:''
+    }));
+  }catch(e){}
+}
+
+// ═══ ANALYSIS DIRECTIVE BUILDER ═══
+// NGSpice syntax (see the ngspice manual, ch. 11 "Analyses and output control"):
+//   .tran Tstep Tstop [Tstart [Tmax]] [UIC]
+//   .dc   Srcnam Vstart Vstop Vincr [Src2 Start2 Stop2 Incr2]
+function buildAnalysisDirective(){
+  var a=simAnalysis;
+  if(a.type==='manual')return '';
+  if(a.type==='op')return '.op';
+  if(a.type==='dc'){
+    var d=a.dc;
+    if(!d.src)return '';
+    var s='.dc '+d.src+' '+(d.start||'0')+' '+(d.stop||'0')+' '+(d.step||'1');
+    if(d.use2&&d.src2)s+=' '+d.src2+' '+(d.start2||'0')+' '+(d.stop2||'0')+' '+(d.step2||'1');
+    return s;
+  }
+  var t=a.tran;
+  if(!t.tstop)return '';
+  var line='.tran '+(t.tstep||'1u')+' '+t.tstop;
+  // Tmax may only be given together with Tstart, so default Tstart to 0.
+  if(t.tstart||t.tmax)line+=' '+(t.tstart||'0');
+  if(t.tmax)line+=' '+t.tmax;
+  if(t.uic)line+=' uic';
+  return line;
+}
+
+// Voltage/current sources available as a .dc sweep source, by SPICE name.
+function sweepableSources(){
+  var refMap=(typeof buildSpiceRefMap==='function')?buildSpiceRefMap():{};
+  var out=[];
+  for(var i=0;i<S.components.length;i++){
+    var c=S.components[i];
+    if(c.type!=='source'&&c.type!=='vcc')continue;
+    var ref=refMap[c.id];
+    if(!ref)continue;
+    var first=ref.charAt(0).toUpperCase();
+    if(first!=='V'&&first!=='I')continue;   // E/G behavioural sources cannot be swept
+    out.push({ref:ref,label:ref+(c.type==='vcc'?' (rail '+(c.label||c.value||'')+')':'')});
+  }
+  return out;
+}
 
 function simLog(msg,isErr){
   var elx=document.getElementById('sim-log');
@@ -49,15 +126,108 @@ function ensureSim(){
   return simStarting;
 }
 
-// Assemble the full deck: generated devices + user analysis directives + .end.
+// ═══ ANALYSIS SETTINGS UI ═══
+function renderAnalysisPanel(){
+  var wrap=document.getElementById('sim-analysis-fields');
+  if(!wrap)return;
+  var sel=document.getElementById('sim-analysis-type');
+  if(sel)sel.value=simAnalysis.type;
+  var a=simAnalysis,html='';
+  function fld(key,label,val,ph,hint){
+    return '<div class="sim-field"><label>'+label+'</label>'+
+      '<input type="text" data-af="'+key+'" value="'+esc(String(val||''))+'" placeholder="'+esc(ph||'')+'" spellcheck="false">'+
+      (hint?'<span class="sim-field-hint">'+hint+'</span>':'')+'</div>';
+  }
+  if(a.type==='tran'){
+    html+='<div class="sim-grid">'+
+      fld('tran.tstep','Step time',a.tran.tstep,'10u')+
+      fld('tran.tstop','Stop time',a.tran.tstop,'5m')+
+      fld('tran.tstart','Start time (opt.)',a.tran.tstart,'0')+
+      fld('tran.tmax','Max step (opt.)',a.tran.tmax,'')+
+      '</div>'+
+      '<label class="sim-check"><input type="checkbox" data-af="tran.uic"'+(a.tran.uic?' checked':'')+'> UIC <span class="sim-sub">(use initial conditions, skip operating point)</span></label>';
+  }else if(a.type==='dc'){
+    var srcs=sweepableSources();
+    var opts='<option value="">— pick a source —</option>';
+    var found=false;
+    for(var i=0;i<srcs.length;i++){
+      if(srcs[i].ref===a.dc.src)found=true;
+      opts+='<option value="'+esc(srcs[i].ref)+'"'+(srcs[i].ref===a.dc.src?' selected':'')+'>'+esc(srcs[i].label)+'</option>';
+    }
+    if(a.dc.src&&!found)opts+='<option value="'+esc(a.dc.src)+'" selected>'+esc(a.dc.src)+' (not in schematic)</option>';
+    html+='<div class="sim-field"><label>Sweep source</label><select data-af="dc.src">'+opts+'</select></div>'+
+      '<div class="sim-grid">'+
+      fld('dc.start','Start',a.dc.start,'0')+fld('dc.stop','Stop',a.dc.stop,'5')+fld('dc.step','Increment',a.dc.step,'0.1')+
+      '</div>'+
+      '<label class="sim-check"><input type="checkbox" data-af="dc.use2"'+(a.dc.use2?' checked':'')+'> Nested second sweep</label>';
+    if(a.dc.use2){
+      var opts2='<option value="">— pick a source —</option>';
+      for(var j=0;j<srcs.length;j++)opts2+='<option value="'+esc(srcs[j].ref)+'"'+(srcs[j].ref===a.dc.src2?' selected':'')+'>'+esc(srcs[j].label)+'</option>';
+      html+='<div class="sim-field"><label>Second source</label><select data-af="dc.src2">'+opts2+'</select></div>'+
+        '<div class="sim-grid">'+
+        fld('dc.start2','Start 2',a.dc.start2,'0')+fld('dc.stop2','Stop 2',a.dc.stop2,'5')+fld('dc.step2','Increment 2',a.dc.step2,'1')+
+        '</div>';
+    }
+  }else if(a.type==='op'){
+    html+='<div class="sim-hint-text">Operating point only — the results are shown as a value table.</div>';
+  }else{
+    html+='<div class="sim-hint-text">Manual mode: write the analysis card yourself in the directives box below (e.g. <code>.ac dec 20 1 1Meg</code>).</div>';
+  }
+  wrap.innerHTML=html;
+  wrap.querySelectorAll('[data-af]').forEach(function(inp){
+    var path=inp.getAttribute('data-af').split('.');
+    var ev=(inp.tagName==='SELECT'||inp.type==='checkbox')?'change':'input';
+    inp.addEventListener(ev,function(){
+      var val=inp.type==='checkbox'?inp.checked:inp.value;
+      simAnalysis[path[0]][path[1]]=val;
+      saveSimSettings();
+      updateDirectivePreview();
+      // structural switches need the fields rebuilt
+      if(path[1]==='use2')renderAnalysisPanel();
+    });
+  });
+  updateDirectivePreview();
+}
+
+function updateDirectivePreview(){
+  var el=document.getElementById('sim-directive-preview');
+  if(!el)return;
+  var d=buildAnalysisDirective();
+  el.textContent=d||'(none — add one in the directives box)';
+  el.classList.toggle('sim-preview-empty',!d);
+}
+
+function onAnalysisTypeChange(sel){
+  simAnalysis.type=sel.value;
+  saveSimSettings();
+  renderAnalysisPanel();
+}
+
+// Assemble the full deck: generated devices + analysis card + user directives + .end.
 function buildFullNetlist(){
   var core=generateNetlist();
   var dirEl=document.getElementById('sim-directives');
   var directives=dirEl?(dirEl.value||'').trim():'';
   var lines=[core];
+  // Terminal currents (@dev[i], @q1[ic], …) are only written to the raw output
+  // when savecurrents is on; enable it as soon as a current probe or a formula
+  // referencing a device current is in play.
+  if(needsCurrents())lines.push('.options savecurrents');
+  var analysis=buildAnalysisDirective();
+  if(analysis)lines.push(analysis);
   if(directives)lines.push(directives);
   lines.push('.end');
   return lines.join('\n');
+}
+
+// Current vectors cost memory, so only ask for them when something needs them.
+function needsCurrents(){
+  var probes=S.probes||[];
+  for(var i=0;i<probes.length;i++)if(probes[i].kind==='I')return true;
+  for(var j=0;j<simFormulas.length;j++){
+    if(simFormulas[j].on!==false&&/[i]\s*\(|@/i.test(simFormulas[j].expr||''))return true;
+  }
+  return getRawMode();
 }
 
 function runSimulation(){
@@ -105,19 +275,64 @@ function getRawMode(){var c=document.getElementById('sim-raw-mode');return !!(c&
 //  - raw mode:  whatever is ticked in the raw vector picker (simRawSelection)
 //  - else:      the probe selection (single V(net) and differential V(a)-V(b)),
 //               falling back to all node voltages when no probes are set.
-function buildSeriesFromResult(result){
-  var isComplex=(result.dataType==='complex');
-  var conv=isComplex?_mag:_re;
+// Build {name -> number[]} for every vector of a result (x axis included).
+function vectorMapOf(result){
+  var conv=(result.dataType==='complex')?_mag:_re;
   var map={};
-  for(var i=1;i<result.data.length;i++){
+  for(var i=0;i<result.data.length;i++){
     map[String(result.data[i].name).toLowerCase()]=result.data[i].values.map(conv);
   }
+  return map;
+}
+
+// Look a vector name up in a result. ngspice itself reports device currents as
+// `@r1[i]`, but the WASM engine re-exports them wrapped as `i(@r1[i])` — accept
+// both spellings so probes and formulas work either way.
+function findVectorKey(map,cand){
+  var k=String(cand).toLowerCase();
+  if(map[k])return k;
+  if(map['i('+k+')'])return 'i('+k+')';
+  var m=k.match(/^i\((.+)\)$/);
+  if(m&&map[m[1]])return m[1];
+  return null;
+}
+
+// Resolve an I-probe to the actual result vector (candidate list + sign).
+function resolveCurrentProbe(pr,map){
+  var comp=S.components.find(function(c){return c.id===pr.compId;});
+  if(!comp)return null;
+  var cv=currentVectorsForPin(comp,pr.pinIdx);
+  if(!cv)return null;
+  for(var i=0;i<cv.cands.length;i++){
+    var key=map?findVectorKey(map,cv.cands[i]):null;
+    if(key){
+      var src=map[key],out=new Array(src.length);
+      for(var k=0;k<src.length;k++)out[k]=cv.sign*src[k];
+      return {label:currentProbeLabel(pr),data:out,cand:key};
+    }
+  }
+  return {label:currentProbeLabel(pr),data:null,cand:cv.cands[0]};
+}
+
+function currentProbeLabel(pr){
+  var comp=S.components.find(function(c){return c.id===pr.compId;});
+  if(!comp)return 'I(?)';
+  var cv=currentVectorsForPin(comp,pr.pinIdx);
+  var ref=cv?cv.dev.toUpperCase():(comp.label||comp.id);
+  var pin=cv?cv.pin:String(pr.pinIdx);
+  return 'I('+ref+'.'+pin+')';
+}
+
+function buildSeriesFromResult(result){
+  var isComplex=(result.dataType==='complex');
+  var map=vectorMapOf(result);
   var names=[],datas=[];
   if(getRawMode()){
     for(var r=1;r<result.data.length;r++){
       var rn=String(result.data[r].name);
       if(simRawSelection[rn.toLowerCase()]){names.push(rn);datas.push(map[rn.toLowerCase()]);}
     }
+    appendFormulaSeries(result,map,names,datas);
     return {names:names,datas:datas};
   }
   var probes=S.probes||[];
@@ -134,8 +349,14 @@ function buildSeriesFromResult(result){
         for(var d=0;d<a.length;d++)diff[d]=a[d]-b[d];
         names.push('V('+pr.p+')-V('+pr.n+')');datas.push(diff);
       }else simLog('differential probe vectors not found: '+kp+', '+kn,true);
+    }else if(pr.kind==='I'){
+      var res=resolveCurrentProbe(pr,map);
+      if(res&&res.data){names.push(res.label);datas.push(res.data);}
+      else simLog('current vector not found: '+(res?res.cand:'?')+' — is `.options savecurrents` supported for this device?',true);
     }
   }
+  appendFormulaSeries(result,map,names,datas);
+  // Nothing selected at all: fall back to every node voltage.
   if(!names.length){
     for(var v=1;v<result.data.length;v++){
       var vv=result.data[v],nm=String(vv.name).toLowerCase();
@@ -143,6 +364,152 @@ function buildSeriesFromResult(result){
     }
   }
   return {names:names,datas:datas};
+}
+
+// ═══════════════════════════════════════════════════
+// USER FORMULAS
+// Arbitrary expressions over the result vectors, e.g.
+//   V(out)-V(in)        differential voltage
+//   V(out)*I(R1)        instantaneous power
+//   abs(@r1[i])         any raw vector, any function of Math
+// Vector references are matched against the names ngspice actually returned;
+// I(dev) is accepted as a shorthand for that device's current vector.
+// ═══════════════════════════════════════════════════
+var SIM_FN=['abs','sqrt','exp','log10','log','ln','sin','cos','tan','atan','asin','acos','sinh','cosh','tanh','min','max','pow','floor','ceil','round','sign'];
+
+// name -> vector-key aliases so I(R1) resolves to @r1[i] / i(v1).
+function formulaAliases(map){
+  var al={};
+  var refMap=(typeof buildSpiceRefMap==='function')?buildSpiceRefMap():{};
+  for(var i=0;i<S.components.length;i++){
+    var c=S.components[i];
+    var ref=refMap[c.id];
+    if(!ref)continue;
+    var cv=currentVectorsForPin(c,0);
+    if(!cv)continue;
+    for(var k=0;k<cv.cands.length;k++){
+      var key=findVectorKey(map,cv.cands[k]);
+      if(key){al['i('+ref.toLowerCase()+')']=key;break;}
+    }
+  }
+  return al;
+}
+
+function escRe(s){return s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}
+
+// Compile an expression into a per-sample function. Throws on unknown tokens.
+function compileFormula(expr,map){
+  var norm=String(expr||'').replace(/\s+/g,'').toLowerCase();
+  if(!norm)throw new Error('empty expression');
+  var aliases=formulaAliases(map);
+  var keys=[];
+  for(var k in map)keys.push({token:k,key:k});
+  for(var a in aliases)if(!map[a])keys.push({token:a,key:aliases[a]});
+  keys.sort(function(p,q){return q.token.length-p.token.length;});
+  var used=[],idxOf={};
+  var work=norm;
+  for(var i=0;i<keys.length;i++){
+    var t=keys[i].token;
+    if(work.indexOf(t)<0)continue;
+    if(!(keys[i].key in idxOf)){idxOf[keys[i].key]=used.length;used.push(keys[i].key);}
+    work=work.split(t).join('\u0001'+idxOf[keys[i].key]+'\u0002');
+  }
+  // functions -> Math.*
+  for(var f=0;f<SIM_FN.length;f++){
+    var fn=SIM_FN[f];
+    var mfn=(fn==='ln')?'log':fn;
+    work=work.replace(new RegExp('(^|[^a-z0-9_.])'+fn+'\\(','g'),'$1\u0003'+mfn+'(');
+  }
+  work=work.replace(/\^/g,'**');
+  // SPICE-style numeric suffixes (1k, 4.7meg, 100n …) — vectors are already
+  // placeholders at this point, so only real numbers can match here.
+  work=work.replace(/(\d+\.?\d*|\.\d+)(meg|t|g|k|m|u|µ|n|p|f)(?![a-z0-9_])/g,function(all,num,suf){
+    var mult={t:1e12,g:1e9,meg:1e6,k:1e3,m:1e-3,u:1e-6,'µ':1e-6,n:1e-9,p:1e-12,f:1e-15}[suf];
+    return '('+(parseFloat(num)*mult)+')';
+  });
+  // Anything left that looks like an identifier is unknown.
+  var leftover=work.replace(/\u0001\d+\u0002/g,'').replace(/\u0003[a-z0-9_]+/g,'');
+  var bad=leftover.match(/[a-z_][a-z0-9_]*\([^()]*\)|[a-z_][a-z0-9_]*/g);
+  if(bad){
+    // allow exponent notation such as 1e-6 (the 'e' is consumed above as ident)
+    var real=bad.filter(function(b){return !/^e$/.test(b);});
+    if(real.length)throw new Error('unknown vector or function: '+real[0]);
+  }
+  if(/[^0-9+\-*/().,%\u0001\u0002\u0003a-z_]/.test(work))throw new Error('illegal character in expression');
+  var js=work.replace(/\u0001(\d+)\u0002/g,'d[$1][i]').replace(/\u0003/g,'M.');
+  var fnBody;
+  try{fnBody=new Function('d','i','M','"use strict";return ('+js+');');}
+  catch(e){throw new Error('cannot parse expression');}
+  return {vectors:used,fn:fnBody};
+}
+
+// Evaluate a formula over the whole result; returns a number[].
+function evalFormula(expr,map,n){
+  var c=compileFormula(expr,map);
+  var d=[];
+  for(var v=0;v<c.vectors.length;v++)d.push(map[c.vectors[v]]);
+  var out=new Array(n);
+  for(var i=0;i<n;i++){
+    var val=c.fn(d,i,Math);
+    out[i]=(typeof val==='number'&&isFinite(val))?val:NaN;
+  }
+  return out;
+}
+
+function appendFormulaSeries(result,map,names,datas){
+  var n=result.data[0].values.length;
+  for(var i=0;i<simFormulas.length;i++){
+    var f=simFormulas[i];
+    if(f.on===false||!f.expr)continue;
+    try{
+      datas.push(evalFormula(f.expr,map,n));
+      names.push(f.name||f.expr);
+      f.error=null;
+    }catch(e){
+      f.error=e.message;
+      simLog('formula "'+(f.name||f.expr)+'": '+e.message,true);
+    }
+  }
+}
+
+function renderFormulaList(){
+  var host=document.getElementById('sim-formula-list');
+  if(!host)return;
+  var html='';
+  for(var i=0;i<simFormulas.length;i++){
+    var f=simFormulas[i];
+    html+='<div class="sim-formula'+(f.error?' has-error':'')+'">'+
+      '<input type="checkbox" data-fi="'+i+'" data-fk="on"'+(f.on===false?'':' checked')+' title="plot this formula">'+
+      '<input type="text" class="sim-f-name" data-fi="'+i+'" data-fk="name" value="'+esc(f.name||'')+'" placeholder="name" spellcheck="false">'+
+      '<input type="text" class="sim-f-expr" data-fi="'+i+'" data-fk="expr" value="'+esc(f.expr||'')+'" placeholder="V(out)-V(in)" spellcheck="false">'+
+      '<button title="remove" onclick="removeFormula('+i+')">&times;</button>'+
+      (f.error?'<div class="sim-f-error">'+esc(f.error)+'</div>':'')+
+      '</div>';
+  }
+  if(!simFormulas.length)html='<span class="sim-probe-empty">none — add one to plot e.g. V(out)-V(in) or V(out)*I(R1)</span>';
+  host.innerHTML=html;
+  host.querySelectorAll('[data-fi]').forEach(function(inp){
+    var idx=parseInt(inp.getAttribute('data-fi'),10),key=inp.getAttribute('data-fk');
+    inp.addEventListener('change',function(){
+      simFormulas[idx][key]=(inp.type==='checkbox')?inp.checked:inp.value;
+      simFormulas[idx].error=null;
+      saveSimSettings();
+      if(simLastResult)plotResult(simLastResult);
+      renderFormulaList();
+    });
+  });
+}
+
+function addFormula(){
+  simFormulas.push({name:'',expr:'',on:true});
+  saveSimSettings();
+  renderFormulaList();
+}
+function removeFormula(i){
+  simFormulas.splice(i,1);
+  saveSimSettings();
+  renderFormulaList();
+  if(simLastResult)plotResult(simLastResult);
 }
 
 function plotResult(result){
@@ -172,7 +539,8 @@ function plotResult(result){
   var xVals=xVar.values.map(_re);
   var ser=buildSeriesFromResult(result);
   var palette=['#00c8ff','#ff9040','#40ff90','#ff5f87','#c080ff','#ffd040','#5fd0ff','#ff6b35'];
-  var series=[{label:isFreq?'Freq [Hz]':(xVar.type==='time'?'Time [s]':(xVar.name||'x'))}];
+  var xLabel=isFreq?'Freq [Hz]':(xVar.type==='time'?'Time [s]':(xVar.name||'x'));
+  var series=[{label:xLabel}];
   for(var k=0;k<ser.names.length;k++){
     series.push({label:ser.names[k]+(isComplex?' |mag|':''),stroke:palette[k%palette.length],width:2});
   }
@@ -180,18 +548,137 @@ function plotResult(result){
     width:Math.max(120,container.clientWidth||600),
     height:Math.max(60,container.clientHeight||320),
     series:series,
-    scales:{x:{time:false,distr:isFreq?3:1}},
+    scales:{
+      x:{time:false,distr:isFreq?3:1},
+      // uPlot re-auto-ranges y on every commit, so an explicit setScale('y')
+      // would not survive. The vertical fit therefore goes through this range
+      // hook (simYFit), which auto-ranging itself honours.
+      y:{range:function(u,dMin,dMax){
+        if(simYFit)return [simYFit[0],simYFit[1]];
+        return uPlot.rangeNum(dMin,dMax,0.1,true);
+      }}
+    },
     cursor:{drag:{x:true,y:true,uni:8}},
     legend:{live:true},
+    plugins:[simTooltipPlugin()],
     axes:[
       {stroke:'#7a92a8',grid:{stroke:'#1c2730'},ticks:{stroke:'#1c2730'}},
-      {stroke:'#7a92a8',grid:{stroke:'#1c2730'},ticks:{stroke:'#1c2730'}}
+      {stroke:'#7a92a8',grid:{stroke:'#1c2730'},ticks:{stroke:'#1c2730'},
+       values:function(u,ticks){return ticks.map(function(t){return fmtEng(t);});}}
     ]
   };
   var data=[xVals].concat(ser.datas);
   container.innerHTML='';
   if(simPlot){simPlot.destroy();simPlot=null;}
+  simYFit=null;
   simPlot=new uPlot(opts,data,container);
+  // Double-click is uPlot's "reset zoom" — drop the manual vertical fit too.
+  container.addEventListener('dblclick',function(){simYFit=null;});
+}
+
+// ═══ VALUE FORMATTING (SI/engineering prefixes) ═══
+var SI_PREFIX=[[1e12,'T'],[1e9,'G'],[1e6,'M'],[1e3,'k'],[1,''],[1e-3,'m'],[1e-6,'µ'],[1e-9,'n'],[1e-12,'p'],[1e-15,'f']];
+function fmtEng(v,digits){
+  if(v==null||typeof v!=='number'||!isFinite(v))return '—';
+  if(v===0)return '0';
+  var a=Math.abs(v);
+  for(var i=0;i<SI_PREFIX.length;i++){
+    if(a>=SI_PREFIX[i][0]*0.999999){
+      var s=(v/SI_PREFIX[i][0]).toPrecision(digits||4);
+      if(s.indexOf('.')>=0)s=s.replace(/0+$/,'').replace(/\.$/,'');
+      return s+(SI_PREFIX[i][1]?' '+SI_PREFIX[i][1]:'');
+    }
+  }
+  return v.toExponential(3);
+}
+
+// ═══ PLOT TOOLTIP ═══
+// uPlot plugin: a floating box next to the cursor listing the x value and the
+// value of every series at the hovered sample.
+function simTooltipPlugin(){
+  var tip=null,over=null;
+  function show(u){
+    var idx=u.cursor.idx;
+    if(idx==null||u.cursor.left<0){tip.style.display='none';return;}
+    var html='<div class="sim-tip-x">'+esc(String(u.series[0].label))+': '+fmtEng(u.data[0][idx],5)+'</div>';
+    for(var i=1;i<u.series.length;i++){
+      var s=u.series[i];
+      if(s.show===false)continue;
+      var val=u.data[i][idx];
+      html+='<div class="sim-tip-row"><span class="sim-tip-dot" style="background:'+(s.stroke||'#888')+'"></span>'+
+        '<span class="sim-tip-lbl">'+esc(String(s.label))+'</span>'+
+        '<span class="sim-tip-val">'+fmtEng(val,5)+'</span></div>';
+    }
+    tip.innerHTML=html;
+    tip.style.display='block';
+    // keep the box inside the plot area
+    var w=tip.offsetWidth,h=tip.offsetHeight;
+    var left=u.cursor.left+14,top=u.cursor.top+14;
+    if(left+w>u.over.clientWidth)left=u.cursor.left-w-14;
+    if(top+h>u.over.clientHeight)top=Math.max(0,u.cursor.top-h-14);
+    tip.style.left=left+'px';tip.style.top=top+'px';
+  }
+  return {
+    hooks:{
+      init:function(u){
+        over=u.over;
+        tip=document.createElement('div');
+        tip.className='sim-tooltip';
+        tip.style.display='none';
+        over.appendChild(tip);
+        over.addEventListener('mouseleave',function(){if(tip)tip.style.display='none';});
+      },
+      setCursor:function(u){if(tip)show(u);},
+      // A drag-zoom is an explicit user range — drop the manual vertical fit.
+      setSelect:function(u){if(u.select&&u.select.height>0)simYFit=null;},
+      destroy:function(){if(tip&&tip.parentNode)tip.parentNode.removeChild(tip);tip=null;}
+    }
+  };
+}
+
+// ═══ FIT BUTTONS ═══
+// Horizontal fit resets the x range to the full data range; vertical fit scales
+// y to the data that is actually visible in the current x window.
+var simYFit=null;   // [min,max] override for the y scale, set by simFitY()
+
+function simFitX(){
+  if(!simPlot||!simPlot.data||!simPlot.data[0]||!simPlot.data[0].length)return;
+  var xs=simPlot.data[0];
+  simPlot.setScale('x',{min:xs[0],max:xs[xs.length-1]});
+}
+function simFitY(xlo,xhi){
+  if(!simPlot||!simPlot.data||simPlot.data.length<2)return;
+  var xs=simPlot.data[0];
+  var xr=simPlot.scales.x;
+  var lo=(xlo!=null)?xlo:((xr&&xr.min!=null)?xr.min:xs[0]);
+  var hi=(xhi!=null)?xhi:((xr&&xr.max!=null)?xr.max:xs[xs.length-1]);
+  var min=Infinity,max=-Infinity;
+  for(var s=1;s<simPlot.data.length;s++){
+    if(simPlot.series[s]&&simPlot.series[s].show===false)continue;
+    var d=simPlot.data[s];
+    for(var i=0;i<d.length;i++){
+      if(xs[i]<lo||xs[i]>hi)continue;
+      var v=d[i];
+      if(v==null||!isFinite(v))continue;
+      if(v<min)min=v;
+      if(v>max)max=v;
+    }
+  }
+  if(!isFinite(min)||!isFinite(max))return;
+  if(min===max){var pad0=Math.abs(min)*0.1||1;min-=pad0;max+=pad0;}
+  else{var pad=(max-min)*0.05;min-=pad;max+=pad;}
+  // Set both: setScale applies it now, simYFit makes it survive the next
+  // auto-range commit (uPlot re-ranges y whenever anything else changes).
+  simYFit=[min,max];
+  simPlot.setScale('y',{min:min,max:max});
+}
+// Both axes to the full data range (the y pass gets the window explicitly, as
+// the x scale is only committed on the next frame).
+function simFitBoth(){
+  if(!simPlot||!simPlot.data||!simPlot.data[0]||!simPlot.data[0].length)return;
+  var xs=simPlot.data[0];
+  simFitX();
+  simFitY(xs[0],xs[xs.length-1]);
 }
 
 // Raw mode: list every vector of the last result with a checkbox so the user
@@ -256,8 +743,34 @@ function _afterProbeChange(){
   if(simLastResult)plotResult(simLastResult); // live re-filter the existing plot
 }
 
-// Single click: toggle a single-ended voltage probe V(net).
+// Is there a current-probeable device pin at (x,y)? Returns {compId,pinIdx,cv}.
+function currentProbeTargetAt(x,y){
+  var near=findPin(x,y,18);
+  if(!near||near.type!=='pin')return null;
+  var comp=S.components.find(function(c){return c.id===near.compId;});
+  if(!comp)return null;
+  var cv=(typeof currentVectorsForPin==='function')?currentVectorsForPin(comp,near.pinIdx):null;
+  if(!cv)return null;
+  return {compId:comp.id,pinIdx:near.pinIdx,cv:cv,x:near.x,y:near.y};
+}
+
+// Single click: on a device pin this toggles a CURRENT probe I(dev.pin);
+// anywhere else on a net it toggles the node voltage probe V(net).
 function toggleProbeAt(x,y){
+  if(!S.probes)S.probes=[];
+  var tgt=currentProbeTargetAt(x,y);
+  if(tgt){
+    var lbl=currentProbeLabel({compId:tgt.compId,pinIdx:tgt.pinIdx});
+    var ci=-1;
+    for(var n=0;n<S.probes.length;n++){
+      var q=S.probes[n];
+      if(q.kind==='I'&&q.compId===tgt.compId&&q.pinIdx===tgt.pinIdx){ci=n;break;}
+    }
+    if(ci>=0){S.probes.splice(ci,1);hint('Probe removed: '+lbl);}
+    else{S.probes.push({kind:'I',compId:tgt.compId,pinIdx:tgt.pinIdx});hint('Current probe added: '+lbl);}
+    _afterProbeChange();
+    return;
+  }
   var net=_probeNet(x,y);
   if(net==='0'){hint('Ground (node 0) is not plottable');return;}
   if(!net){hint('No net to probe here');return;}
@@ -298,20 +811,26 @@ function clearProbes(){
 }
 
 function _probeLabel(pr){
+  if(pr.kind==='I')return currentProbeLabel(pr);
   return pr.kind==='Vd'?('V('+pr.p+')−V('+pr.n+')'):('V('+pr.net+')');
 }
 
 function renderProbeList(){
   var el=document.getElementById('sim-probe-list');
   if(!el)return;
+  // Drop current probes whose component has been deleted meanwhile.
+  if(S.probes)S.probes=S.probes.filter(function(p){
+    return p.kind!=='I'||S.components.some(function(c){return c.id===p.compId;});
+  });
   var probes=S.probes||[];
   if(!probes.length){
-    el.innerHTML='<span class="sim-probe-empty">none — probe a net (P, click) or drag between two nets for a differential; otherwise all node voltages are shown</span>';
+    el.innerHTML='<span class="sim-probe-empty">none — in probe mode click a pin for its terminal current, a wire for the node voltage, or drag between two nets for a differential; otherwise all node voltages are shown</span>';
     return;
   }
   var html='';
   for(var i=0;i<probes.length;i++){
-    html+='<span class="sim-chip">'+_probeLabel(probes[i])+'<button title="remove" onclick="removeProbe('+i+')">×</button></span>';
+    var cls=probes[i].kind==='I'?'sim-chip sim-chip-i':'sim-chip';
+    html+='<span class="'+cls+'">'+esc(_probeLabel(probes[i]))+'<button title="remove" onclick="removeProbe('+i+')">×</button></span>';
   }
   el.innerHTML=html;
 }
@@ -323,34 +842,48 @@ function removeProbe(idx){
 }
 
 // ═══ SPLIT-SCREEN VIEW ═══
-// The plot lives in a bottom pane that splits the canvas vertically; the
-// simulation settings live in the properties panel. SIMULATE toggles both.
+// Two independent pieces of UI:
+//   * the plot pane at the bottom of the canvas   (simViewActive)
+//   * the settings page inside the properties bar (simPanelOpen)
+// SIMULATE opens both, but the settings page can be closed on its own — and it
+// yields automatically as soon as a component is selected — so component
+// properties stay reachable while a simulation plot is open.
 function toggleSimView(){ setSimView(!simViewActive); }
 
 function setSimView(on){
   simViewActive=!!on;
   var pane=document.getElementById('sim-pane');
   var divider=document.getElementById('sim-divider');
-  var settings=document.getElementById('sim-settings');
   var btn=document.getElementById('btn-sim');
   if(pane)pane.style.display=simViewActive?'flex':'none';
   if(divider)divider.style.display=simViewActive?'block':'none';
   if(btn)btn.classList.toggle('active',simViewActive);
-  if(settings){
-    if(simViewActive){
-      // show sim settings, hide the other properties sections
-      document.getElementById('props-content').style.display='none';
-      var cc=document.getElementById('custom-comp-section');if(cc)cc.style.display='none';
-      settings.style.display='block';
-      renderProbeList();
-    }else{
-      settings.style.display='none';
-      renderProps(); // restore normal properties view
-    }
-  }
+  setSimPanel(simViewActive);
   if(typeof applyView==='function')applyView();  // SVG viewBox tracks the new pane size
   if(simViewActive&&simLastResult)plotResult(simLastResult);
 }
+
+// Show/hide the simulation settings inside the properties sidebar.
+function setSimPanel(on){
+  simPanelOpen=!!on;
+  var settings=document.getElementById('sim-settings');
+  if(!settings)return;
+  if(simPanelOpen){
+    var pc=document.getElementById('props-content');if(pc)pc.style.display='none';
+    var cc=document.getElementById('custom-comp-section');if(cc)cc.style.display='none';
+    settings.style.display='block';
+    renderAnalysisPanel();
+    renderFormulaList();
+    renderProbeList();
+  }else{
+    settings.style.display='none';
+    if(typeof renderProps==='function')renderProps(); // restore the normal properties view
+  }
+}
+
+function closeSimPanel(){ setSimPanel(false); }
+// Re-open the settings page from the plot pane header without touching the plot.
+function showSimPanel(){ setSimPanel(true); }
 
 // Drag the horizontal divider to resize the plot pane.
 (function initSimDivider(){
@@ -378,6 +911,19 @@ function setSimView(on){
       dragging=false;divider.classList.remove('dragging');document.body.style.cursor='';
       if(simLastResult)plotResult(simLastResult);
     });
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',attach);else attach();
+})();
+
+// ═══ INIT ═══
+(function initSimSettings(){
+  function attach(){
+    loadSimSettings();
+    var dir=document.getElementById('sim-directives');
+    if(dir)dir.addEventListener('input',saveSimSettings);
+    renderAnalysisPanel();
+    renderFormulaList();
+    renderProbeList();
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',attach);else attach();
 })();

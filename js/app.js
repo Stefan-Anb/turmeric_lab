@@ -259,13 +259,19 @@ function updateStatus(){
 
 // ═══ PROPERTIES PANEL ═══
 function renderProps(){
-  // While the split-screen simulation view is open, the properties panel is
-  // dedicated to the simulation settings; don't clobber it.
-  if(typeof simViewActive!=='undefined' && simViewActive){
-    var ss=document.getElementById('sim-settings'); if(ss)ss.style.display='block';
-    document.getElementById('props-content').style.display='none';
-    var ccs=document.getElementById('custom-comp-section'); if(ccs)ccs.style.display='none';
-    return;
+  // The simulation settings share the properties panel. They stay in front only
+  // while nothing is selected — selecting a component hands the panel back to
+  // the properties (the plot pane itself stays open). The settings can be
+  // reopened from the plot header or the SIMULATE button.
+  if(typeof simPanelOpen!=='undefined' && simPanelOpen){
+    if(S.selected.length){
+      if(typeof setSimPanel==='function'){setSimPanel(false);return;}
+    }else{
+      var ss=document.getElementById('sim-settings'); if(ss)ss.style.display='block';
+      document.getElementById('props-content').style.display='none';
+      var ccs=document.getElementById('custom-comp-section'); if(ccs)ccs.style.display='none';
+      return;
+    }
   }
   document.getElementById('custom-comp-section').style.display='none';
   document.getElementById('custom-comp-edit').style.display='none';
@@ -384,6 +390,60 @@ function selectComp(type,ev){
   showGhost(type);
 }
 
+// ═══ DRAG & DROP PLACEMENT ═══
+// Sidebar buttons carry data-comp and draggable=true; dropping one on the
+// canvas places it at the drop position (an alternative to click-to-arm +
+// click-to-place, which keeps working).
+var dndType=null;
+(function initCompDnD(){
+  function attach(){
+    var sidebar=document.getElementById('sidebar');
+    var pane=document.getElementById('schematic-pane');
+    if(!sidebar||!pane)return;
+    // Delegated so dynamically added custom-component buttons work too.
+    sidebar.addEventListener('dragstart',function(e){
+      var btn=e.target&&e.target.closest?e.target.closest('.comp-btn[data-comp]'):null;
+      if(!btn)return;
+      var type=btn.getAttribute('data-comp');
+      mergeCustomComponents();
+      if(!CD[type]){e.preventDefault();return;}
+      dndType=type;
+      if(e.dataTransfer){
+        e.dataTransfer.effectAllowed='copy';
+        try{e.dataTransfer.setData('text/plain',type);}catch(err){}
+      }
+    });
+    sidebar.addEventListener('dragend',function(){
+      dndType=null;
+      if(S.mode!=='place')clearGhost();
+    });
+    pane.addEventListener('dragover',function(e){
+      if(!dndType)return;
+      e.preventDefault();
+      if(e.dataTransfer)e.dataTransfer.dropEffect='copy';
+      var pt=svgPt(e),sp=snp(pt.x,pt.y);
+      showGhost(dndType);
+      moveGhost(sp.x,sp.y);
+    });
+    pane.addEventListener('dragleave',function(e){
+      if(dndType&&!pane.contains(e.relatedTarget))clearGhost();
+    });
+    pane.addEventListener('drop',function(e){
+      var type=dndType||(e.dataTransfer?e.dataTransfer.getData('text/plain'):'');
+      if(!type)return;
+      e.preventDefault();
+      dndType=null;
+      mergeCustomComponents();
+      if(!CD[type]){clearGhost();return;}
+      if(S.mode!=='place')clearGhost();
+      var pt=svgPt(e),sp=snp(pt.x,pt.y);
+      placeComp(type,sp);
+      hint('Placed '+(CD[type]._name||type)+' at '+sp.x+', '+sp.y);
+    });
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',attach);else attach();
+})();
+
 // ═══ GHOST ═══
 var ghostEl=null;var placeRot=0,placeMirror=false;
 function showGhost(t){
@@ -443,10 +503,52 @@ var probeState={active:false,startX:null,startY:null,startNetName:null,startIsPi
 var probeStartHighlightEl=null;
 var probeDragLineEl=null;
 
-function showProbeHighlight(x,y,isPin){
+// Hovering a device pin in probe mode measures the CURRENT INTO that terminal,
+// so the marker is a distinct current symbol (ring + arrow pointing into the
+// device + "I" tag) instead of the plain voltage ring used on nets.
+function showProbeHighlight(x,y,isPin,pinRef){
   clearProbeHighlight();
+  var cv=null;
+  if(pinRef){
+    var comp=S.components.find(function(c){return c.id===pinRef.compId;});
+    if(comp&&typeof currentVectorsForPin==='function')cv=currentVectorsForPin(comp,pinRef.pinIdx);
+    if(cv)cv._comp=comp;
+  }
+  if(cv){
+    probeHighlightEl=drawCurrentProbeMarker(x,y,cv._comp,cv);
+    return;
+  }
   probeHighlightEl=CE(lyrO,x,y,isPin?9:12,'probe-highlight'+(isPin?' pin':''));
   probeHighlightEl.style.opacity='1';
+}
+
+// Arrow points from outside the symbol towards the component body: that is the
+// direction of a positive terminal current.
+function drawCurrentProbeMarker(x,y,comp,cv){
+  var g=el('g',{class:'probe-current-marker'});
+  var dx=comp?(comp.x-x):0, dy=comp?(comp.y-y):-1;
+  var len=Math.hypot(dx,dy)||1;
+  var ux=dx/len, uy=dy/len;
+  if(!comp||(dx===0&&dy===0)){ux=0;uy=-1;}
+  var tailX=x-ux*26, tailY=y-uy*26;   // start outside the pin
+  var headX=x+ux*6,  headY=y+uy*6;    // end just inside the body
+  var line=el('line',{x1:tailX,y1:tailY,x2:headX,y2:headY,class:'probe-current-arrow'});
+  g.appendChild(line);
+  var px=-uy, py=ux;
+  var back=8, wide=4;
+  g.appendChild(el('polygon',{
+    points:headX+','+headY+' '+
+           (headX-ux*back+px*wide)+','+(headY-uy*back+py*wide)+' '+
+           (headX-ux*back-px*wide)+','+(headY-uy*back-py*wide),
+    class:'probe-current-head'}));
+  var ring=el('circle',{cx:x,cy:y,r:9,class:'probe-highlight current'});
+  g.appendChild(ring);
+  var tag=el('text',{x:x+px*16,y:y+py*16+4,class:'probe-current-tag'});
+  tag.textContent=cv?('I '+cv.dev.toUpperCase()+'.'+cv.pin):'I';
+  tag.setAttribute('text-anchor','middle');
+  g.appendChild(tag);
+  lyrO.appendChild(g);
+  return g;
 }
 
 function showProbeStartHighlight(x,y,isPin){
@@ -620,7 +722,7 @@ svg.addEventListener('mousemove',function(e){
       updateProbeDrag(pt);
       var nearPin=findPin(pt.x,pt.y,18);
       if(nearPin&&nearPin.type==='pin'){
-        showProbeHighlight(nearPin.x,nearPin.y,true);
+        showProbeHighlight(nearPin.x,nearPin.y,true,{compId:nearPin.compId,pinIdx:nearPin.pinIdx});
       } else {
         var wseg=findWireSeg(pt.x,pt.y,10);
         var junc=juncAt(pt.x,pt.y);
@@ -636,7 +738,12 @@ svg.addEventListener('mousemove',function(e){
     clearProbeStartHighlight();
     var nearPin=findPin(pt.x,pt.y,18);
     if(nearPin&&nearPin.type==='pin'){
-      showProbeHighlight(nearPin.x,nearPin.y,true);
+      showProbeHighlight(nearPin.x,nearPin.y,true,{compId:nearPin.compId,pinIdx:nearPin.pinIdx});
+      var pc=S.components.find(function(c){return c.id===nearPin.compId;});
+      var pcv=(pc&&typeof currentVectorsForPin==='function')?currentVectorsForPin(pc,nearPin.pinIdx):null;
+      hint(pcv?('Click to plot the current into '+pcv.dev.toUpperCase()+'.'+pcv.pin
+                  +' — drag for a differential voltage')
+              :'No terminal current available for this pin — click plots the node voltage');
       svg.style.cursor='crosshair';
     } else {
       var wseg=findWireSeg(pt.x,pt.y,10);
@@ -1944,6 +2051,8 @@ function renderCustomCompsList(){
       sbBtn.className='comp-btn';
       sbBtn.innerHTML='<svg class="comp-prev" viewBox="-10 -8 20 16"><rect x="-8" y="-6" width="16" height="12" stroke="#00c8ff" stroke-width="1.5" fill="none"/><line x1="-4" y1="-3" x2="4" y2="-3" stroke="#00c8ff" stroke-width="1"/><line x1="-4" y1="3" x2="4" y2="3" stroke="#00c8ff" stroke-width="1"/></svg>'+(def._name||def.lbl);
       sbBtn.onclick=function(k){return function(e){selectComp(k,e);};}(key);
+      sbBtn.setAttribute('draggable','true');
+      sbBtn.setAttribute('data-comp',key);
       sidebar.appendChild(sbBtn);
     }
   }

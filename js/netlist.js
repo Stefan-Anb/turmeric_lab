@@ -148,15 +148,88 @@ function getTempNetName(wireId){
   return tempNetNamesGen[netKey]||'n000';
 }
 
+// ═══ SPICE DEVICE REFERENCES ═══
+// Single source of truth for the instance name each component gets in the
+// netlist. generateNetlist() uses it for the emitted cards, the probe code uses
+// it to build current-vector names — so both can never drift apart.
+function buildSpiceRefMap(){
+  var map={},counts={vcc:0,source:0};
+  var passive=['resistor','capacitor','inductor'];
+  for(var i=0;i<S.components.length;i++){
+    var c=S.components[i],t=c.type;
+    if(t==='gnd')continue;
+    if(t==='vcc'){counts.vcc++;map[c.id]='V'+counts.vcc;continue;}
+    if(t==='source'){
+      counts.source++;
+      var sref=c.label||'SRC'+counts.source;
+      var meas=c.meas||'V';
+      var mode=c.mode||'DC';
+      var pre=(mode==='BEHAV')?(meas==='I'?'G':'E'):(meas==='I'?'I':'V');
+      map[c.id]=pre+sref;continue;
+    }
+    if(t==='sw'){map[c.id]='S'+(c.label||'');continue;}
+    if(t==='npn'||t==='pnp'){map[c.id]='Q'+(c.label||'');continue;}
+    if(t==='nmos'||t==='pmos'){map[c.id]='M'+(c.label||'');continue;}
+    if(t==='diode'||t==='led'){map[c.id]='D'+(c.label||'');continue;}
+    if(t.indexOf('custom_')===0){map[c.id]='X'+(c.label||'');continue;}
+    if(passive.indexOf(t)>=0){map[c.id]=c.label||'';continue;}
+  }
+  return map;
+}
+
+// Candidate ngspice vector names for the current flowing INTO a given pin, plus
+// the sign that converts the device vector into that terminal current.
+// Device currents come from `.options savecurrents` (@dev[i], @dev[ic], …);
+// voltage-source branch currents are saved by ngspice anyway (i(v1)).
+// Several candidates are returned because the exact parameter name differs
+// between device types and ngspice versions — the plotter takes the first one
+// the result actually contains.
+function currentVectorsForPin(comp,pinIdx){
+  var ref=(buildSpiceRefMap()[comp.id]||'').toLowerCase();
+  if(!ref)return null;
+  var t=comp.type;
+  var def=CD[t];
+  var pinName=(def&&def.pins[pinIdx])?def.pins[pinIdx].n:String(pinIdx);
+  function res(cands,sign){
+    return {cands:cands,sign:sign,dev:ref,pin:pinName};
+  }
+  // Two-terminal devices: the device current is defined from pin 0 to pin 1.
+  if(t==='resistor'||t==='capacitor'||t==='inductor'||t==='sw'){
+    return res(['@'+ref+'[i]'],pinIdx===0?1:-1);
+  }
+  if(t==='diode'||t==='led'){
+    return res(['@'+ref+'[id]','@'+ref+'[i]'],pinIdx===0?1:-1);
+  }
+  if(t==='vcc'){
+    // Rail source: pin 0 is the rail node, current is drawn out of it.
+    return res(['i('+ref+')','@'+ref+'[i]'],-1);
+  }
+  if(t==='source'){
+    // i(Vx) is positive for current flowing into the + terminal (pin 0).
+    return res(['i('+ref+')','@'+ref+'[i]'],pinIdx===0?1:-1);
+  }
+  if(t==='npn'||t==='pnp'){
+    var bjt=['ib','ic','ie'][pinIdx]; // pins: B, C, E
+    if(!bjt)return null;
+    return res(['@'+ref+'['+bjt+']'],1);
+  }
+  if(t==='nmos'||t==='pmos'){
+    var mos=['ig','id','is'][pinIdx]; // pins: G, D, S
+    if(!mos)return null;
+    return res(['@'+ref+'['+mos+']'],1);
+  }
+  return null;
+}
+
 function generateNetlist(){
   tempNetNamesGen={};
   tempNetCounterGen=0;
   getTempNetName(S.wires.length>0?S.wires[0].id:null);
+  var refMap=buildSpiceRefMap();
   var lines=[];
   var subcircuits=[];
   var passive=['resistor','capacitor','inductor'];
   var swModels=[];
-  var counts={vcc:0,source:0};
   // Determine which component classes are actually present, so we only emit
   // the default .model card for classes that have at least one instance.
   var present={};
@@ -175,8 +248,7 @@ function generateNetlist(){
     var c=S.components[ci];
     var def=CD[c.type];
     if(c.type==='vcc'){
-      counts.vcc++;
-      var ref='V'+counts.vcc;
+      var ref=refMap[c.id];
       var tp=xfPin(def.pins[0].x,def.pins[0].y,c.rot||0,c.mirror||false);
       var px=c.x+tp.x,py=c.y+tp.y;
       var netName=getNetNameWithTempNames(px,py);
@@ -186,11 +258,9 @@ function generateNetlist(){
       continue;
     }
     if(c.type==='source'){
-      counts.source++;
-      var ref=c.label||'SRC'+counts.source;
       var mode=c.mode||'DC';
-      var meas=c.meas||'V';
-      var prefix=meas==='I'?'I':'V';
+      // refMap already carries the type prefix (V/I, or E/G for behavioural).
+      var dev=refMap[c.id];
       var tp1=xfPin(def.pins[0].x,def.pins[0].y,c.rot||0,c.mirror||false);
       var tp2=xfPin(def.pins[1].x,def.pins[1].y,c.rot||0,c.mirror||false);
       var px1=c.x+tp1.x,py1=c.y+tp1.y;
@@ -202,7 +272,7 @@ function generateNetlist(){
       var line='';
       if(mode==='DC'){
         var val=c.value||def.val||'1';
-        line=prefix+ref+' '+net1+' '+net2+' DC '+val;
+        line=dev+' '+net1+' '+net2+' DC '+val;
       }else if(mode==='AC'){
         var vo=c.ac_offset||'0';
         var va=c.ac_amplitude||'1';
@@ -210,7 +280,7 @@ function generateNetlist(){
         var td=c.ac_tdelay||'0';
         var theta=c.ac_theta||'0';
         var phi=c.ac_phi||'0';
-        line=prefix+ref+' '+net1+' '+net2+' SIN('+vo+' '+va+' '+freq+' '+td+' '+theta+' '+phi+')';
+        line=dev+' '+net1+' '+net2+' SIN('+vo+' '+va+' '+freq+' '+td+' '+theta+' '+phi+')';
       }else if(mode==='PULSE'){
         var v1=c.pulse_vinit||'0';
         var v2=c.pulse_von||'1';
@@ -220,18 +290,17 @@ function generateNetlist(){
         var pw=c.pulse_ton||'1e-3';
         var per=c.pulse_tperiod||'1e-3';
         var np=c.pulse_ncycles||'1';
-        line=prefix+ref+' '+net1+' '+net2+' PULSE('+v1+' '+v2+' '+td+' '+tr+' '+tf+' '+pw+' '+per+' '+np+')';
+        line=dev+' '+net1+' '+net2+' PULSE('+v1+' '+v2+' '+td+' '+tr+' '+tf+' '+pw+' '+per+' '+np+')';
       }else if(mode==='BEHAV'){
         var eq=c.beh_eq||'0';
-        var behPrefix=meas==='I'?'G':'E';
-        line=behPrefix+ref+' '+net1+' '+net2+' cur = \''+eq+'\'';
+        line=dev+' '+net1+' '+net2+' cur = \''+eq+'\'';
       }
       lines.push(line);
       continue;
     }
     if(c.type==='gnd')continue;
     if(c.type==='sw'){
-      var ref=c.label||'';
+      var ref=refMap[c.id];
       var model=c.model||'defaultswitch';
       var nets=[];
       for(var pi=0;pi<def.pins.length;pi++){
@@ -240,12 +309,12 @@ function generateNetlist(){
         var netName=getNetNameWithTempNames(px,py);
         nets.push(netName);
       }
-      var line='S'+ref+' '+nets[0]+' '+nets[1]+' '+nets[3]+' '+nets[2]+' '+model;
+      var line=ref+' '+nets[0]+' '+nets[1]+' '+nets[3]+' '+nets[2]+' '+model;
       lines.push(line);
       continue;
     }
     if(c.type==='npn'||c.type==='pnp'){
-      var ref=c.label||'';
+      var ref=refMap[c.id];
       var model=c.value||(c.type==='npn'?'npn_default':'pnp_default');
       var nets=[];
       for(var pi=0;pi<def.pins.length;pi++){
@@ -254,12 +323,12 @@ function generateNetlist(){
         var netName=getNetNameWithTempNames(px,py);
         nets.push(netName);
       }
-      var line='Q'+ref+' '+nets[1]+' '+nets[0]+' '+nets[2]+' '+model;
+      var line=ref+' '+nets[1]+' '+nets[0]+' '+nets[2]+' '+model;
       lines.push(line);
       continue;
     }
     if(c.type==='nmos'||c.type==='pmos'){
-      var ref=c.label||'';
+      var ref=refMap[c.id];
       var model=c.value||(c.type==='nmos'?'mos_n_default':'mos_p_default');
       var nets=[];
       for(var pi=0;pi<def.pins.length;pi++){
@@ -268,12 +337,12 @@ function generateNetlist(){
         var netName=getNetNameWithTempNames(px,py);
         nets.push(netName);
       }
-      var line='M'+ref+' '+nets[1]+' '+nets[0]+' '+nets[2]+' '+model;
+      var line=ref+' '+nets[1]+' '+nets[0]+' '+nets[2]+' '+model;
       lines.push(line);
       continue;
     }
     if(c.type==='diode'||c.type==='led'){
-      var ref=c.label||'';
+      var ref=refMap[c.id];
       var model=c.value||'defaultdiode';
       var nets=[];
       for(var pi=0;pi<def.pins.length;pi++){
@@ -282,12 +351,12 @@ function generateNetlist(){
         var netName=getNetNameWithTempNames(px,py);
         nets.push(netName);
       }
-      var line='D'+ref+' '+nets[0]+' '+nets[1]+' '+model;
+      var line=ref+' '+nets[0]+' '+nets[1]+' '+model;
       lines.push(line);
       continue;
     }
     if(c.type.indexOf('custom_')===0){
-      var ref=c.label||'';
+      var ref=refMap[c.id];
       var subname=def._name||def.lbl||c.type;
       var nets=[];
       for(var pi=0;pi<def.pins.length;pi++){
@@ -296,12 +365,12 @@ function generateNetlist(){
         var netName=getNetNameWithTempNames(px,py);
         nets.push(netName);
       }
-      var line='X'+ref+' '+nets.join(' ')+' '+subname;
+      var line=ref+' '+nets.join(' ')+' '+subname;
       lines.push(line);
       continue;
     }
     if(passive.indexOf(c.type)<0)continue;
-    var ref=c.label||'';
+    var ref=refMap[c.id];
     var nets=[];
     for(var pi=0;pi<def.pins.length;pi++){
       var tp=xfPin(def.pins[pi].x,def.pins[pi].y,c.rot||0,c.mirror||false);

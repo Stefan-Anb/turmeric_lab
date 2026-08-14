@@ -501,6 +501,36 @@ Vorteile:
 >   sich auch zusätzliche `.model`-Karten ergänzen. Vollständige Netzliste =
 >   `generateNetlist()` + Direktiven + `.end`.
 >
+> **Nachtrag (2026-08-14), UI-Ausbau:**
+> - **Panel-Umschaltung:** Plot-Pane (`simViewActive`) und Einstellungsseite in
+>   der Sidebar (`simPanelOpen`) sind entkoppelt. Beim Selektieren eines Bauteils
+>   tritt die Einstellungsseite automatisch zurück (`renderProps`), das Plot-Pane
+>   bleibt offen; zurück per `SETTINGS`-Button im Plot-Header oder `SIMULATE`.
+> - **Drag & Drop:** Sidebar-Buttons tragen `draggable`/`data-comp`; ein Drop auf
+>   `#schematic-pane` platziert das Bauteil an der Drop-Position (Ghost-Vorschau
+>   beim `dragover`). Klick-und-platzieren funktioniert unverändert weiter.
+> - **Strommessung am Pin:** Im Probe-Modus misst ein Klick auf einen Bauteil-Pin
+>   den **Strom in diesen Anschluss** (Marker: Ringsymbol + Pfeil ins Bauteil +
+>   `I <DEV>.<PIN>`); nur auf Netzen/Drähten wird weiterhin die Knotenspannung
+>   gemessen. `S.probes` kennt dafür `{kind:'I',compId,pinIdx}`. Die Deckliste
+>   bekommt bei Bedarf `.options savecurrents`; die Vektornamen liefert
+>   `currentVectorsForPin()` in [js/netlist.js](js/netlist.js) (`@r1[i]`,
+>   `@q1[ic]`, `i(vsrc1)` …). Die eecircuit-Engine exportiert Geräteströme als
+>   `i(@r1[i])`, deshalb probiert `findVectorKey()` beide Schreibweisen.
+> - **Formeln:** Beliebige Ausdrücke über die Ergebnisvektoren
+>   (`V(out)-V(in)`, `V(out)*I(R1)`, `abs(@r1[i])`, SPICE-Suffixe wie `1k`),
+>   compiliert nach JS; unbekannte Bezeichner werden inline gemeldet.
+> - **Analysekonfigurator:** `.tran`/`.dc`/`.op` werden per Formular gebaut
+>   (`buildAnalysisDirective`, Syntax nach NGSpice-Manual:
+>   `.tran Tstep Tstop [Tstart [Tmax]] [UIC]`,
+>   `.dc Srcnam Vstart Vstop Vincr [Src2 …]`), Vorschau der Karte inline.
+>   `Manual` überlässt die Analysekarte wieder dem Direktivenfeld.
+>   Analyse, Formeln und Direktiven liegen in `localStorage['sim_settings']`.
+> - **Plot:** Wert-Tooltip am Cursor (SI-Präfixe) sowie Buttons `FIT`, `FIT X`
+>   und `FIT Y`. Da uPlot die y-Skala bei jedem Commit neu autoranged, läuft der
+>   vertikale Fit über den `range`-Hook der y-Skala (`simYFit`) plus `setScale`;
+>   Doppelklick bzw. ein Aufzieh-Zoom verwerfen den Fit wieder.
+>
 > **Bekannte Einschränkungen / nächste Schritte:**
 > 1. **Online-Abhängigkeit:** Engine und uPlot kommen beim ersten Lauf vom CDN.
 >    Für Offline-Betrieb sollten beide ins Repo vendoriert werden.
