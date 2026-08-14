@@ -1003,9 +1003,10 @@ function placeComp(type,sp){
   var def=CD[type];
   var lbl=type==='netconn'?'NET':def.lbl+nextRefNum(def.lbl);
   var comp={id:newId(),type:type,x:sp.x,y:sp.y,label:lbl,value:def.val,rot:placeRot,mirror:placeMirror,props:{}};
-  // initialize enum defaults
+  // initialize enum and plain property defaults
   for(const[key,pd]of Object.entries(def.props||{})){
     if(pd.type==='enum'&&Array.isArray(pd.options)&&!comp[key]){comp[key]=pd.options[0].v;}
+    else if(pd.def!==undefined&&!comp[key]){comp[key]=pd.def;}
   }
   S.components.push(comp);
   // Render first so the user sees the placed component immediately

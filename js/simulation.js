@@ -21,6 +21,7 @@ var simRawSelection={};    // raw mode: map of vector-name(lowercase) -> true to
 var simRawInit=false;      // whether the raw picker has been prefilled for the current result
 var simViewActive=false;   // split-screen plot pane open?
 var simPanelOpen=false;    // simulation settings shown in the properties sidebar?
+var simXUnit='';           // unit of the x axis of the current plot ('s', 'Hz', …)
 
 // Analysis configuration (GUI-built .tran / .dc directive) and user formulas.
 // Both are persisted separately from the schematic so they survive a reload.
@@ -230,10 +231,24 @@ function needsCurrents(){
   return getRawMode();
 }
 
+var simRunToken=0;      // identifies the newest run, so a stale watchdog stays quiet
+
 function runSimulation(){
   var btn=document.getElementById('sim-run-btn');
   if(btn)btn.disabled=true;
   var logEl=document.getElementById('sim-log');if(logEl)logEl.textContent='';
+  // A fatal ngspice error (e.g. an unknown function in a B-source) aborts the
+  // WASM instance without ever settling runSim()'s promise, which would leave
+  // the UI stuck on "Simulating…" forever. The watchdog reports that and drops
+  // the dead engine so the next run starts a fresh one.
+  var token=++simRunToken;
+  var watchdog=setTimeout(function(){
+    if(token!==simRunToken)return;
+    simStatus('No response from NGSpice after 90 s — the engine probably aborted (see the log / browser console). A fresh engine will be loaded on the next run.');
+    simLog('watchdog: no result after 90 s, dropping the engine instance',true);
+    simInstance=null;simStarting=null;
+    if(btn)btn.disabled=false;
+  },90000);
   ensureSim().then(function(sim){
     var netlist=buildFullNetlist();
     simLog('--- Netlist sent to NGSpice ---');
@@ -261,6 +276,7 @@ function runSimulation(){
     simStatus('Simulation failed: '+(err&&err.message||err));
     simLog(String(err&&err.stack||err),true);
   }).then(function(){
+    clearTimeout(watchdog);
     if(btn)btn.disabled=false;
   });
 }
@@ -529,7 +545,7 @@ function plotResult(result){
     for(var t=0;t<result.data.length;t++){
       var dv=result.data[t];
       var val=dv.values&&dv.values.length?dv.values[0]:'';
-      html+='<tr><td>'+dv.name+'</td><td>'+(isComplex?_mag(val).toPrecision(6):(_re(val)).toPrecision(6))+'</td></tr>';
+      html+='<tr><td>'+dv.name+'</td><td>'+fmtEng(isComplex?_mag(val):_re(val),6)+'</td></tr>';
     }
     html+='</table>';
     container.innerHTML=html;
@@ -539,10 +555,14 @@ function plotResult(result){
   var xVals=xVar.values.map(_re);
   var ser=buildSeriesFromResult(result);
   var palette=['#00c8ff','#ff9040','#40ff90','#ff5f87','#c080ff','#ffd040','#5fd0ff','#ff6b35'];
-  var xLabel=isFreq?'Freq [Hz]':(xVar.type==='time'?'Time [s]':(xVar.name||'x'));
-  var series=[{label:xLabel}];
+  // The axis ticks and the readouts carry the unit, so the label stays bare.
+  var xUnit=isFreq?'Hz':(xVar.type==='time'?'s':'');
+  var xLabel=isFreq?'Frequency':(xVar.type==='time'?'Time':(xVar.name||'x'));
+  simXUnit=xUnit;
+  var series=[{label:xLabel,value:function(u,v){return fmtEng(v,6,xUnit);}}];
   for(var k=0;k<ser.names.length;k++){
-    series.push({label:ser.names[k]+(isComplex?' |mag|':''),stroke:palette[k%palette.length],width:2});
+    series.push({label:ser.names[k]+(isComplex?' |mag|':''),stroke:palette[k%palette.length],width:2,
+      value:function(u,v){return fmtEng(v,6);}});
   }
   var opts={
     width:Math.max(120,container.clientWidth||600),
@@ -562,9 +582,14 @@ function plotResult(result){
     legend:{live:true},
     plugins:[simTooltipPlugin()],
     axes:[
-      {stroke:'#7a92a8',grid:{stroke:'#1c2730'},ticks:{stroke:'#1c2730'}},
       {stroke:'#7a92a8',grid:{stroke:'#1c2730'},ticks:{stroke:'#1c2730'},
-       values:function(u,ticks){return ticks.map(function(t){return fmtEng(t);});}}
+       // A log frequency axis spans decades, so there each tick carries its own
+       // prefix (1 Hz / 1 kHz / 1 MHz); a linear time axis gets a common one.
+       values:isFreq
+         ?function(u,ticks){return ticks.map(function(t){return fmtEng(t,4,xUnit);});}
+         :function(u,ticks){return axisValuesSI(u,ticks,'x',xUnit);}},
+      {stroke:'#7a92a8',grid:{stroke:'#1c2730'},ticks:{stroke:'#1c2730'},
+       values:function(u,ticks){return axisValuesSI(u,ticks,'y','');}}
     ]
   };
   var data=[xVals].concat(ser.datas);
@@ -578,18 +603,72 @@ function plotResult(result){
 
 // ═══ VALUE FORMATTING (SI/engineering prefixes) ═══
 var SI_PREFIX=[[1e12,'T'],[1e9,'G'],[1e6,'M'],[1e3,'k'],[1,''],[1e-3,'m'],[1e-6,'µ'],[1e-9,'n'],[1e-12,'p'],[1e-15,'f']];
-function fmtEng(v,digits){
-  if(v==null||typeof v!=='number'||!isFinite(v))return '—';
-  if(v===0)return '0';
-  var a=Math.abs(v);
+
+// Index into SI_PREFIX for a magnitude, e.g. 4.7e-5 -> the 'µ' entry.
+function siIndexFor(mag){
+  if(!isFinite(mag)||mag===0)return 4;   // the '1 / no prefix' entry
   for(var i=0;i<SI_PREFIX.length;i++){
-    if(a>=SI_PREFIX[i][0]*0.999999){
-      var s=(v/SI_PREFIX[i][0]).toPrecision(digits||4);
-      if(s.indexOf('.')>=0)s=s.replace(/0+$/,'').replace(/\.$/,'');
-      return s+(SI_PREFIX[i][1]?' '+SI_PREFIX[i][1]:'');
-    }
+    if(mag>=SI_PREFIX[i][0]*0.999999)return i;
   }
-  return v.toExponential(3);
+  return SI_PREFIX.length-1;
+}
+// SI prefix for a single magnitude, e.g. 4.7e-5 -> {mult:1e-6, prefix:'µ'}.
+function siFor(mag){
+  var e=SI_PREFIX[siIndexFor(mag)];
+  return {mult:e[0],prefix:e[1]};
+}
+function trimNum(v,digits){
+  var s=v.toPrecision(digits||6);
+  if(s.indexOf('e')>=0)return String(+s);
+  if(s.indexOf('.')>=0)s=s.replace(/0+$/,'').replace(/\.$/,'');
+  return s==='-0'?'0':s;
+}
+// Single value with its own prefix, e.g. fmtEng(2e-3,5,'s') -> "2 ms".
+function fmtEng(v,digits,unit){
+  unit=unit||'';
+  if(v==null||typeof v!=='number'||!isFinite(v))return '—';
+  if(v===0)return unit?'0 '+unit:'0';
+  var si=siFor(Math.abs(v));
+  var s=trimNum(v/si.mult,digits||4);
+  var suf=si.prefix+unit;
+  return suf?s+' '+suf:s;
+}
+
+// Axis ticks: one common prefix for the whole visible range, so a 0…800 µs
+// window reads 0 / 200 / 400 / 600 / 800 µs instead of 0.0002 / 0.0004 / …
+// The prefix follows the visible *span*, not the absolute values, so zooming
+// into a 20 µs slice of a 5 ms run switches the axis to µs. It only steps back
+// up when the window sits so far from zero that the labels would run past four
+// integer digits. Everything is derived from the scale (not from the ticks), so
+// it stays in sync no matter in which order uPlot draws things.
+function axisValuesSI(u,ticks,scaleKey,unit){
+  var sc=u.scales[scaleKey]||{};
+  var lo=(sc.min!=null)?sc.min:(ticks.length?ticks[0]:0);
+  var hi=(sc.max!=null)?sc.max:(ticks.length?ticks[ticks.length-1]:0);
+  var maxAbs=Math.max(Math.abs(lo),Math.abs(hi));
+  var span=Math.abs(hi-lo)||maxAbs;
+  var idx=siIndexFor(span);
+  while(idx>0&&maxAbs/SI_PREFIX[idx][0]>=10000)idx--;
+  var si={mult:SI_PREFIX[idx][0],prefix:SI_PREFIX[idx][1]};
+  var suf=si.prefix+(unit||'');
+  var scaled=ticks.map(function(t){return t/si.mult;});
+  // Use as many decimals as it takes to keep neighbouring ticks distinct — and
+  // the same count on every tick, so the axis reads as one column of numbers.
+  var dec=0;
+  for(;dec<12;dec++){
+    var ok=true;
+    for(var i=1;i<scaled.length;i++){
+      if(scaled[i].toFixed(dec)===scaled[i-1].toFixed(dec)){ok=false;break;}
+    }
+    if(ok)break;
+  }
+  return scaled.map(function(v,i){
+    // A bare numeric axis shows plain "0" rather than "0 m".
+    if(ticks[i]===0&&!unit)return (0).toFixed(dec);
+    var s=v.toFixed(dec);
+    if(s==='-'+(0).toFixed(dec))s=(0).toFixed(dec);
+    return suf?s+' '+suf:s;
+  });
 }
 
 // ═══ PLOT TOOLTIP ═══
@@ -600,7 +679,7 @@ function simTooltipPlugin(){
   function show(u){
     var idx=u.cursor.idx;
     if(idx==null||u.cursor.left<0){tip.style.display='none';return;}
-    var html='<div class="sim-tip-x">'+esc(String(u.series[0].label))+': '+fmtEng(u.data[0][idx],5)+'</div>';
+    var html='<div class="sim-tip-x">'+esc(String(u.series[0].label))+': '+fmtEng(u.data[0][idx],5,simXUnit)+'</div>';
     for(var i=1;i<u.series.length;i++){
       var s=u.series[i];
       if(s.show===false)continue;
@@ -848,7 +927,13 @@ function removeProbe(idx){
 // SIMULATE opens both, but the settings page can be closed on its own — and it
 // yields automatically as soon as a component is selected — so component
 // properties stay reachable while a simulation plot is open.
-function toggleSimView(){ setSimView(!simViewActive); }
+// SIMULATE: if the plot pane is open but the settings page has been pushed
+// aside (by selecting a component, or by its close button), the first click
+// brings the settings back instead of tearing the whole view down.
+function toggleSimView(){
+  if(simViewActive&&!simPanelOpen){setSimPanel(true);return;}
+  setSimView(!simViewActive);
+}
 
 function setSimView(on){
   simViewActive=!!on;

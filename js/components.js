@@ -178,6 +178,91 @@ const CD={
       T(g,0,-24,v.label||'D','comp-label');
     }
   },
+  zener:{
+    // Z-diode: the breakdown voltage is a per-instance property; the netlist
+    // generator emits a matching `.model … D(BV=…)` card for each one.
+    lbl:'D',val:'BZX55C5V1',hitW:100,hitH:40,
+    props:{
+      label:{l:'Reference'},
+      value:{l:'Part'},
+      bv:{l:'Breakdown Vz (V)',def:'5.1'},
+      rs:{l:'Series R (Ω)',def:'1'},
+      iz:{l:'Knee current Iz (A)',def:'5m'},
+      model:{l:'Model override (opt.)'}
+    },
+    pins:[{x:-40,y:0,n:'A'},{x:40,y:0,n:'K'}],
+    draw(g,v){
+      L(g,-40,0,-12,0,'comp-pin');
+      PY(g,'-12,-12 -12,12 12,0','comp-body');
+      // cathode bar with the characteristic Z-shaped flags
+      var bar=PE(g,'M4,-16 L12,-12 L12,12 L20,16','comp-body');bar.style.fill='none';
+      L(g,12,0,40,0,'comp-pin');
+      T(g,0,-20,v.label||'D','comp-label');
+      T(g,0,32,(v.bv||'')?((v.bv||'')+'V'):(v.value||''),'comp-value');
+    }
+  },
+  scr:{
+    // Thyristor (SCR). Simulated with the classic two-transistor macro model,
+    // emitted as the `scr_default` subcircuit by the netlist generator.
+    lbl:'SCR',val:'',hitW:100,hitH:100,
+    props:{
+      label:{l:'Reference'},
+      value:{l:'Part'},
+      vgt:{l:'Gate trigger Vgt (V)',def:'0.7'},
+      ih:{l:'Holding current Ih (A)',def:'5m'},
+      ron:{l:'On resistance (Ω)',def:'0.1'},
+      model:{l:'Subcircuit override (opt.)'}
+    },
+    pins:[{x:-40,y:0,n:'A'},{x:40,y:0,n:'K'},{x:20,y:40,n:'G'}],
+    draw(g,v){
+      L(g,-40,0,-12,0,'comp-pin');
+      PY(g,'-12,-12 -12,12 12,0','comp-body');
+      LE(g,12,-14,12,14,'comp-body');
+      L(g,12,0,40,0,'comp-pin');
+      L(g,12,7,20,20,'comp-pin');L(g,20,20,20,40,'comp-pin');
+      T(g,-4,-20,v.label||'SCR','comp-label');
+      if(v.value)T(g,-4,30,v.value,'comp-value');
+    }
+  },
+  pwmgen:{
+    // PWM generator with half-bridge gate-drive outputs (behavioural subcircuit).
+    // IN sets the duty cycle (0 … Range maps to 0 … 100 %) and is always
+    // referenced to real ground (node 0). Each output has its own return:
+    // OUTH/COMH is the high-side pair, OUTL/COML the low-side one.
+    lbl:'PWM',val:'',hitW:180,hitH:200,
+    props:{
+      label:{l:'Reference'},
+      pwm_freq:{l:'Frequency (Hz)',def:'10k'},
+      pwm_range:{l:'Input range for 100 % (V)',def:'5'},
+      pwm_vhigh:{l:'Output high (V)',def:'12'},
+      pwm_vlow:{l:'Output low (V)',def:'0'},
+      pwm_deadtime:{l:'Dead time (s)',def:'0'}
+    },
+    pins:[{x:-80,y:0,n:'IN'},
+          {x:80,y:-60,n:'OUTH'},{x:80,y:-20,n:'COMH'},
+          {x:80,y:20,n:'OUTL'},{x:80,y:60,n:'COML'}],
+    draw(g,v){
+      R(g,-60,-80,120,160,'comp-body');
+      L(g,-80,0,-60,0,'comp-pin');
+      L(g,60,-60,80,-60,'comp-pin');L(g,60,-20,80,-20,'comp-pin');
+      L(g,60,20,80,20,'comp-pin');L(g,60,60,80,60,'comp-pin');
+      var names=[['IN',-52,4,'start'],
+                 ['OUTH',52,-56,'end'],['COMH',52,-16,'end'],
+                 ['OUTL',52,24,'end'],['COML',52,64,'end']];
+      for(var i=0;i<names.length;i++){
+        var t=el('text',{x:names[i][1],y:names[i][2],class:'comp-label'});
+        t.textContent=names[i][0];t.setAttribute('text-anchor',names[i][3]);
+        t.style.fontSize='12px';g.appendChild(t);
+      }
+      // separator between the high- and the low-side half
+      var sep=LE(g,-60,0,60,0,'comp-pin');sep.style.strokeDasharray='4 4';sep.style.opacity='.45';
+      // duty-cycle icon
+      PE(g,'M-24,-30 L-24,-46 L-10,-46 L-10,-30 L2,-30 L2,-46 L16,-46 L16,-30',
+        'comp-body').style.fill='none';
+      T(g,-2,-90,v.label||'PWM','comp-label');
+      T(g,-2,48,(v.pwm_freq||'')?((v.pwm_freq||'')+'Hz'):'','comp-value');
+    }
+  },
   npn:{
     lbl:'Q',val:'2N2222',hitW:100,hitH:100,
     props:{label:{l:'Reference'},value:{l:'Part'}},

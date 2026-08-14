@@ -224,6 +224,52 @@ zunächst feste Modellkarten und durchläuft dann `S.components` in einer große
 | sw | `S<label> nA nB n(-) n(+) <model>` | `Sxxx N+ N- NC+ NC- model` | **Steuerknoten vertauscht** (3.2 #3) |
 | custom_* | `X<label> nets... <subname>` | `Xxxx nodes subckt` | ok, aber `.subckt`-Rumpf ist Platzhalter |
 | opamp | (keine Ausgabe) | bräuchte Subcircuit | **fehlt komplett** (3.2 #6) |
+| zener *(neu 2026-08-14)* | `D<label> nA nK zm_<ref>` + eigene `.model … D(BV=…)` | `Dxxx n+ n- model` | ok; Durchbruchspannung je Instanz |
+| scr *(neu 2026-08-14)* | `X<label> nA nG nK scr_<ref>` + verhaltensbasierter `.subckt` | `Xxxx nodes subckt` | ok; Latch-Modell, siehe 3.4 |
+| pwmgen *(neu 2026-08-14)* | `X<label> IN OUTH COMH OUTL COML pwmgen_<ref>` + `.subckt` | `Xxxx nodes subckt` | ok; B-Source-Modell, siehe 3.4 |
+
+### 3.4 Zusammengesetzte Bauteile (Modellkarten und Subcircuits)
+
+Diese drei Typen bringen ihr Simulationsmodell selbst mit; die Karten werden am
+Ende der Netzliste emittiert, jeweils pro Instanz, damit die Parameter direkt
+als Literale eingesetzt werden können (keine `params:`-Expansion nötig).
+
+**Z-Diode (`zenerModelCard`).** Ein gewöhnliches Diodenmodell mit der
+Durchbruchspannung der Instanz: `.model zm_dd1 D(IS=1e-14 N=1.6 RS=… CJO=100p
+BV=<Vz> IBV=<Iz>)`. Verifiziert per `.dc`-Sweep: bei `BV=5.1` klemmt die
+Ausgangsspannung eines 1 k/Z-Shuntreglers ab ca. 10 V Eingangsspannung auf
+5.10 … 5.16 V, bei `BV=12` entsprechend auf ~12 V.
+
+**Thyristor (`scrSubckt`).** Das klassische Zwei-Transistor-Makromodell wurde
+verworfen: mit festen Stromverstärkungen ist α_npn + α_pnp > 1 bei *jedem*
+Strom, das Modell zündet also von selbst (gemessen: 7 … 25 mA Sperrstrom, egal
+wie Rgk, BF oder ISE gewählt werden). Stattdessen wird der Latch-Zustand
+explizit geführt: eine B-Source setzt `st`, wenn V(G,K) > Vgt, und hält ihn,
+solange der über `Vsense` gemessene Anodenstrom > Ih ist; `st` steuert einen
+Schalter in Reihe mit einer Diode (Durchlassspannung). Das RC am Zustandsknoten
+bricht die algebraische Rückkopplung auf. Verifiziert: 1 µA Sperrstrom, Zünden
+per Gate-Puls, Halten nach dem Puls, Verlöschen bei Stromunterbrechung und
+Sperren bis zum nächsten Gate-Puls.
+
+**PWM-Generator (`pwmGenSubckt`).** Ports `IN OUTH COMH OUTL COML`: IN und der
+Modulator liegen fest auf echtem Massepotential (Knoten 0, in Subcircuits
+global), jeder Ausgang treibt gegen seinen eigenen Rückleiter — OUTH/COMH für
+die High Side (kann mit dem Schaltknoten mitfahren), OUTL/COML für die Low
+Side. Sägezahn per B-Source, Vergleich gegen
+V(IN); IN = 0 … Range ergibt 0 … 100 % Tastgrad. Die Totzeit wird **nicht** über
+`delay()` eingefügt (das Vorlagenmodell nutzt das, aber dieser WASM-Build kennt
+die Funktion nicht: `no such function 'delay'` → `exit(1)`, die Engine bleibt
+hängen), sondern über verschobene Vergleichsschwellen: der Sägezahn steigt pro
+Periode um `Range`, eine Totzeit `dt` entspricht also dem Spannungsversatz
+dv = dt·f·Range. High-Side leitet für dv < saw < V(IN), Low-Side für
+saw > V(IN) + dv — beide Einschaltflanken verzögert, Ausschaltflanken
+unverändert. Verifiziert: 10 kHz, IN = 1 V bei Range 5 V → 17,9 % statt 20 %
+(2 µs Totzeit), kein Überlappen der Ausgänge.
+
+Strommessung an diesen Subcircuits: NGSpice legt die Ströme der Bauteile
+*innerhalb* eines Subcircuits als `i(v.xscr1.vsense)` bzw. `i(b.xpwm1.bouth)`
+ab, darüber sind Anodenstrom (SCR) und Ausgangsströme (PWM, jeweils an OUTH/COMH
+und OUTL/COML) probebar.
 
 Die 3-Pin-VDMOS-Form ist laut Manual gültig ("the fourth node of the vdmos
 instance can be removed"), siehe Quellen unten. Die NPN/PNP-Reihenfolge
@@ -526,6 +572,15 @@ Vorteile:
 >   `.dc Srcnam Vstart Vstop Vincr [Src2 …]`), Vorschau der Karte inline.
 >   `Manual` überlässt die Analysekarte wieder dem Direktivenfeld.
 >   Analyse, Formeln und Direktiven liegen in `localStorage['sim_settings']`.
+> - **Achsenbeschriftung:** Beide Achsen wählen ein gemeinsames SI-Präfix für das
+>   *sichtbare Fenster* (`axisValuesSI`), das Präfix folgt dabei der Spannweite,
+>   nicht dem Absolutwert — ein 20-µs-Ausschnitt eines 5-ms-Laufs wird also in µs
+>   beschriftet. Erst wenn das Fenster so weit von null entfernt liegt, dass die
+>   Beschriftung über vier Vorkommastellen läuft, geht es eine Stufe hoch. Die
+>   Nachkommastellen werden so gewählt, dass benachbarte Ticks unterscheidbar
+>   bleiben (einheitlich über alle Ticks). Die Zeitachse trägt die Einheit direkt
+>   am Tick (`0.5 ms`), logarithmische Frequenzachsen bekommen pro Dekade ihr
+>   eigenes Präfix (`1 Hz`, `1 kHz`, `1 MHz`).
 > - **Plot:** Wert-Tooltip am Cursor (SI-Präfixe) sowie Buttons `FIT`, `FIT X`
 >   und `FIT Y`. Da uPlot die y-Skala bei jedem Commit neu autoranged, läuft der
 >   vertikale Fit über den `range`-Hook der y-Skala (`simYFit`) plus `setScale`;

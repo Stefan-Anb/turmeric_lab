@@ -170,7 +170,8 @@ function buildSpiceRefMap(){
     if(t==='sw'){map[c.id]='S'+(c.label||'');continue;}
     if(t==='npn'||t==='pnp'){map[c.id]='Q'+(c.label||'');continue;}
     if(t==='nmos'||t==='pmos'){map[c.id]='M'+(c.label||'');continue;}
-    if(t==='diode'||t==='led'){map[c.id]='D'+(c.label||'');continue;}
+    if(t==='diode'||t==='led'||t==='zener'){map[c.id]='D'+(c.label||'');continue;}
+    if(t==='scr'||t==='pwmgen'){map[c.id]='X'+(c.label||'');continue;}
     if(t.indexOf('custom_')===0){map[c.id]='X'+(c.label||'');continue;}
     if(passive.indexOf(t)>=0){map[c.id]=c.label||'';continue;}
   }
@@ -197,7 +198,7 @@ function currentVectorsForPin(comp,pinIdx){
   if(t==='resistor'||t==='capacitor'||t==='inductor'||t==='sw'){
     return res(['@'+ref+'[i]'],pinIdx===0?1:-1);
   }
-  if(t==='diode'||t==='led'){
+  if(t==='diode'||t==='led'||t==='zener'){
     return res(['@'+ref+'[id]','@'+ref+'[i]'],pinIdx===0?1:-1);
   }
   if(t==='vcc'){
@@ -218,7 +219,87 @@ function currentVectorsForPin(comp,pinIdx){
     if(!mos)return null;
     return res(['@'+ref+'['+mos+']'],1);
   }
+  // Subcircuit devices: ngspice exposes the currents of the parts inside the
+  // subcircuit (i(v.xscr1.vsense) …), so the built-in models can still be
+  // probed. A user-supplied model has an unknown interior — no probe then.
+  if(t==='scr'&&!comp.model){
+    if(pinIdx===2)return null;                       // gate current not modelled
+    return res(['i(v.'+ref+'.vsense)','@v.'+ref+'.vsense[i]'],pinIdx===0?1:-1);
+  }
+  if(t==='pwmgen'){
+    // pins: IN, OUTH, COMH, OUTL, COML — the two output sources can be probed,
+    // their return pins carry the same current with the opposite sign.
+    var bsrc=[null,'bouth','bouth','boutl','boutl'][pinIdx];
+    if(!bsrc)return null;
+    return res(['i(b.'+ref+'.'+bsrc+')','@b.'+ref+'.'+bsrc+'[i]'],(pinIdx===1||pinIdx===3)?1:-1);
+  }
   return null;
+}
+
+// ═══ MODEL / SUBCIRCUIT TEMPLATES FOR THE COMPOSITE PARTS ═══
+
+// Z-diode: a plain diode model with the instance's breakdown voltage. IBV is
+// the current at which BV is specified, so it doubles as the knee current.
+function zenerModelCard(name,c){
+  var bv=(c.bv||'5.1'),rs=(c.rs||'1'),iz=(c.iz||'5m');
+  return '.model '+name+' D(IS=1e-14 N=1.6 RS='+rs+' CJO=100p BV='+bv+' IBV='+iz+')';
+}
+
+// Thyristor: behavioural latch model. A plain two-transistor macro model cannot
+// hold off (its loop gain a_npn + a_pnp is > 1 at any current, so it self-fires
+// at a few mA), therefore the latch state is kept explicitly: it sets when the
+// gate exceeds Vgt and holds as long as the anode current stays above Ih. The
+// state node drives a switch in series with a diode for the forward drop; the
+// RC on the state node breaks the algebraic feedback loop.
+function scrSubckt(name,c){
+  var vgt=c.vgt||'0.7',ih=c.ih||'5m',ron=c.ron||'0.1';
+  return [
+    '* Thyristor (SCR) — behavioural latch ('+name+')',
+    '.subckt '+name+' A G K',
+    'Vsense A a1 DC 0',
+    'Dfwd  a1 a2 '+name+'_d',
+    'Ssw   a2 K  st 0 '+name+'_sw',
+    'Blatch stx 0 V = ( (v(G,K) > '+vgt+') || (v(st) > 0.5 && i(Vsense) > '+ih+') ) ? 1 : 0',
+    'Rlat  stx st 100',
+    'Clat  st  0  10n',
+    'Rgk   G   K  1k',
+    'Roff  A   K  10meg',
+    '.model '+name+'_sw SW(vt=0.5 vh=0.2 ron='+ron+' roff=1e9)',
+    '.model '+name+'_d  D(IS=1e-12 N=1.2 RS=0.05)',
+    '.ends '+name
+  ];
+}
+
+// PWM generator with half-bridge gate-drive outputs, built from behavioural
+// sources. A sawtooth of amplitude `range` is compared against the IN voltage,
+// so IN = 0 … range maps to 0 … 100 % duty. IN and the modulator are referenced
+// to real ground (node 0, global inside subcircuits); each output drives
+// against its own return, OUTH/COMH for the high side and OUTL/COML for the
+// low side, so the high-side pair can float with the switch node.
+//
+// The dead time is inserted by shifting the comparison thresholds rather than
+// by delaying the logic signals: the sawtooth climbs `range` volts per period,
+// so a dead time `dt` corresponds to the voltage offset dv = dt·f·range. The
+// high side then conducts while dv < saw < V(IN) and the low side while
+// saw > V(IN) + dv, which delays both turn-ons without touching the turn-offs.
+// (The `delay()` operator of the reference model hangs this WASM ngspice
+// build, and it would also introduce an algebraic loop.)
+function pwmGenSubckt(name,c){
+  var f=c.pwm_freq||'10k';
+  var range=c.pwm_range||'5';
+  var vhigh=c.pwm_vhigh||'12';
+  var vlow=c.pwm_vlow||'0';
+  var dt=String(c.pwm_deadtime||'0').trim();
+  var hasDt=!!dt&&parseFloat(dt)!==0;
+  var dv=hasDt?('('+dt+'*'+f+'*'+range+')'):'0';
+  return [
+    '* PWM generator + half-bridge drive ('+name+'), dead time '+(hasDt?dt+'s':'off'),
+    '.subckt '+name+' IN OUTH COMH OUTL COML',
+    'Bsaw  saw  0 v = (time - floor(time*'+f+')/'+f+') * '+range+' * '+f,
+    'Bouth OUTH COMH v = (v(saw) > '+dv+' && v(saw) < v(IN)) ? '+vhigh+' : '+vlow,
+    'Boutl OUTL COML v = (v(saw) > (v(IN) + '+dv+')) ? '+vhigh+' : '+vlow,
+    '.ends '+name
+  ];
 }
 
 function generateNetlist(){
@@ -230,6 +311,9 @@ function generateNetlist(){
   var subcircuits=[];
   var passive=['resistor','capacitor','inductor'];
   var swModels=[];
+  var zenerModels=[];   // per-instance .model cards for Z-diodes
+  var pwmSubs=[];       // per-instance PWM generator subcircuits
+  var scrSubs=[];       // per-instance thyristor subcircuits
   // Determine which component classes are actually present, so we only emit
   // the default .model card for classes that have at least one instance.
   var present={};
@@ -341,6 +425,49 @@ function generateNetlist(){
       lines.push(line);
       continue;
     }
+    if(c.type==='zener'){
+      var ref=refMap[c.id];
+      // Each Z-diode gets its own .model card carrying its breakdown voltage,
+      // unless the user pinned an explicit model name.
+      var model=c.model||('zm_'+ref.toLowerCase());
+      if(!c.model)zenerModels.push(zenerModelCard(model,c));
+      var nets=[];
+      for(var pi=0;pi<def.pins.length;pi++){
+        var tp=xfPin(def.pins[pi].x,def.pins[pi].y,c.rot||0,c.mirror||false);
+        nets.push(getNetNameWithTempNames(c.x+tp.x,c.y+tp.y));
+      }
+      lines.push(ref+' '+nets[0]+' '+nets[1]+' '+model);   // D<ref> anode cathode model
+      continue;
+    }
+    if(c.type==='scr'){
+      var ref=refMap[c.id];
+      var subname=c.model||('scr_'+ref.toLowerCase());
+      if(!c.model)scrSubs.push(scrSubckt(subname,c));
+      var nets=[];
+      for(var pi=0;pi<def.pins.length;pi++){
+        var tp=xfPin(def.pins[pi].x,def.pins[pi].y,c.rot||0,c.mirror||false);
+        nets.push(getNetNameWithTempNames(c.x+tp.x,c.y+tp.y));
+      }
+      // pins are A, K, G — the subcircuit port order is A G K
+      lines.push(ref+' '+nets[0]+' '+nets[2]+' '+nets[1]+' '+subname);
+      continue;
+    }
+    if(c.type==='pwmgen'){
+      var ref=refMap[c.id];
+      // One subcircuit per instance with the parameters inlined: that keeps the
+      // deck free of parameter expansion and lets us drop the dead-time delay
+      // lines entirely when no dead time is configured.
+      var subname='pwmgen_'+ref.toLowerCase();
+      pwmSubs.push(pwmGenSubckt(subname,c));
+      var nets=[];
+      for(var pi=0;pi<def.pins.length;pi++){
+        var tp=xfPin(def.pins[pi].x,def.pins[pi].y,c.rot||0,c.mirror||false);
+        nets.push(getNetNameWithTempNames(c.x+tp.x,c.y+tp.y));
+      }
+      // pin order matches the subcircuit ports: IN OUTH COMH OUTL COML
+      lines.push(ref+' '+nets.join(' ')+' '+subname);
+      continue;
+    }
     if(c.type==='diode'||c.type==='led'){
       var ref=refMap[c.id];
       var model=c.value||'defaultdiode';
@@ -381,6 +508,20 @@ function generateNetlist(){
     var val=c.value||def.val;
     var line=ref+' '+nets[0]+' '+nets[1]+' '+val;
     lines.push(line);
+  }
+
+  if(zenerModels.length){
+    lines.push('');
+    lines.push('* Z-diode models');
+    for(var zi=0;zi<zenerModels.length;zi++)lines.push(zenerModels[zi]);
+  }
+  for(var si2=0;si2<scrSubs.length;si2++){
+    lines.push('');
+    for(var sl=0;sl<scrSubs[si2].length;sl++)lines.push(scrSubs[si2][sl]);
+  }
+  for(var pi2=0;pi2<pwmSubs.length;pi2++){
+    lines.push('');
+    for(var pl=0;pl<pwmSubs[pi2].length;pl++)lines.push(pwmSubs[pi2][pl]);
   }
 
   var processedSubcircuits={};
