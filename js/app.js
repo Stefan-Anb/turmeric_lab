@@ -1024,7 +1024,7 @@ function placeComp(type,sp){
     comp.ac_tdelay = comp.ac_tdelay || '0';
     comp.ac_theta = comp.ac_theta || '0';
     comp.ac_phi = comp.ac_phi || '0';
-    comp.ac_ncycles = comp.ac_ncycles || '1';
+    comp.ac_ncycles = comp.ac_ncycles || '0';
     // Pulse defaults
     comp.pulse_vinit = comp.pulse_vinit || '0';
     comp.pulse_von = comp.pulse_von || '5';
@@ -1033,7 +1033,7 @@ function placeComp(type,sp){
     comp.pulse_tfall = comp.pulse_tfall || '1e-6';
     comp.pulse_ton = comp.pulse_ton || '0.001';
     comp.pulse_tperiod = comp.pulse_tperiod || '0.002';
-    comp.pulse_ncycles = comp.pulse_ncycles || '1';
+    comp.pulse_ncycles = comp.pulse_ncycles || '0';
     // Behavioural
     comp.beh_eq = comp.beh_eq || '';
   }
@@ -1427,6 +1427,26 @@ function cutSelected(){
   deleteSelected();
 }
 
+// Fresh reference designators for a batch of pasted components, exactly as if
+// each one had been placed anew (nextRefNum), so copy/paste never produces
+// duplicate SPICE refs. Net Connectors keep their fixed 'NET' placeholder
+// label instead (placeComp does the same) — their real name is re-derived
+// from whatever net they land on, via applyNetConnName.
+function computePasteLabels(bufferComps){
+  var counters={};
+  var labels=[];
+  for(var i=0;i<bufferComps.length;i++){
+    var oc=bufferComps[i];
+    if(oc.type==='netconn'){labels.push('NET');continue;}
+    var def=CD[oc.type];
+    var prefix=def?def.lbl:'';
+    if(!(prefix in counters))counters[prefix]=nextRefNum(prefix);
+    labels.push(prefix+counters[prefix]);
+    counters[prefix]++;
+  }
+  return labels;
+}
+
 function pasteFromBuffer(){
   if(!S.buffer)return;
   if(S.buffer.comps.length===0&&S.buffer.wires.length===0&&S.buffer.junctions.length===0)return;
@@ -1454,9 +1474,10 @@ function pasteFromBuffer(){
   S.pasteMode.ghostWireEls=[];
   S.pasteMode.origX=minX;
   S.pasteMode.origY=minY;
+  S.pasteMode.newLabels=computePasteLabels(S.buffer.comps);
   for(var i=0;i<S.buffer.comps.length;i++){
     var oc=S.buffer.comps[i];
-    var nc={id:newId(),type:oc.type,x:oc.x,y:oc.y,label:oc.label,value:oc.value,rot:oc.rot,mirror:oc.mirror};
+    var nc={id:newId(),type:oc.type,x:oc.x,y:oc.y,label:S.pasteMode.newLabels[i],value:oc.value,rot:oc.rot,mirror:oc.mirror};
     S.pasteMode.compMap[oc.id]=nc.id;
     var g=el('g',{class:'component-group ghost',transform:'translate('+nc.x+','+nc.y+')','data-id':nc.id});
     var inner=el('g',{class:''});
@@ -1560,7 +1581,7 @@ function confirmPaste(dx,dy){
   if(!S.pasteMode.active)return;
   for(var i=0;i<S.pasteMode.ghostCompEls.length;i++){
     var sp=snp(S.buffer.comps[i].x+dx,S.buffer.comps[i].y+dy);
-    var nc={id:S.pasteMode.compMap[S.buffer.comps[i].id],type:S.buffer.comps[i].type,x:sp.x,y:sp.y,label:S.buffer.comps[i].label,value:S.buffer.comps[i].value,rot:S.buffer.comps[i].rot,mirror:S.buffer.comps[i].mirror};
+    var nc={id:S.pasteMode.compMap[S.buffer.comps[i].id],type:S.buffer.comps[i].type,x:sp.x,y:sp.y,label:S.pasteMode.newLabels[i],value:S.buffer.comps[i].value,rot:S.buffer.comps[i].rot,mirror:S.buffer.comps[i].mirror};
     S.components.push(nc);
     S.pasteMode.ghostCompEls[i].remove();
   }
@@ -1596,6 +1617,12 @@ function confirmPaste(dx,dy){
     }
   }
   cleanJuncs();
+  // Net Connectors get their real name from whatever net they now touch —
+  // same as a freshly placed one (placeComp -> applyNetConnName).
+  for(var key in S.pasteMode.compMap){
+    var pastedNc=S.components.find(function(c){return c.id===S.pasteMode.compMap[key];});
+    if(pastedNc&&pastedNc.type==='netconn')applyNetConnName(pastedNc);
+  }
   S.selected=[];
   for(var key in S.pasteMode.compMap){
     S.selected.push({type:'comp',id:S.pasteMode.compMap[key]});
@@ -1681,7 +1708,18 @@ function exportSVG(){
   // Embed schematic state for round-trip import
   var desc=document.createElementNS('http://www.w3.org/2000/svg','desc');
   desc.setAttribute('id','schematic-data');
-  var state={components:S.components,wires:S.wires,junctions:S.junctions,nextId:S.nextId};
+  var simDirEl=document.getElementById('sim-directives');
+  var state={components:S.components,wires:S.wires,junctions:S.junctions,nextId:S.nextId,
+    // Full simulation setup, including the analysis params of modes that
+    // aren't currently selected, so switching modes never loses their config.
+    sim:{
+      analysis:(typeof simAnalysis!=='undefined')?simAnalysis:undefined,
+      formulas:(typeof simFormulas!=='undefined')?simFormulas:undefined,
+      directives:simDirEl?simDirEl.value:'',
+      saveAll:(typeof getRawMode==='function')?getRawMode():undefined,
+      probes:S.probes||[]
+    }
+  };
   desc.textContent=JSON.stringify(state);
   clone.insertBefore(desc,st.nextSibling);
   var a=document.createElement('a');
@@ -1710,7 +1748,31 @@ function importSVG(){
         S.wires=state.wires||[];
         S.junctions=state.junctions||[];
         S.nextId=state.nextId||1;
+        S.probes=[];
         S.selected=[];
+        // Restore the simulation setup (analysis params, formulas, manual
+        // directives, probes) if this SVG carries one.
+        if(state.sim){
+          var sim=state.sim;
+          if(sim.analysis&&typeof simAnalysis!=='undefined'){
+            simAnalysis.type=sim.analysis.type||simAnalysis.type;
+            if(sim.analysis.tran)for(var kt in sim.analysis.tran)simAnalysis.tran[kt]=sim.analysis.tran[kt];
+            if(sim.analysis.dc)for(var kd in sim.analysis.dc)simAnalysis.dc[kd]=sim.analysis.dc[kd];
+            if(sim.analysis.ac)for(var ka in sim.analysis.ac)simAnalysis.ac[ka]=sim.analysis.ac[ka];
+          }
+          if(Array.isArray(sim.formulas)&&typeof simFormulas!=='undefined')simFormulas=sim.formulas;
+          var simDirEl2=document.getElementById('sim-directives');
+          if(simDirEl2)simDirEl2.value=sim.directives||'';
+          var saveAllEl=document.getElementById('sim-raw-mode');
+          if(saveAllEl&&typeof sim.saveAll==='boolean')saveAllEl.checked=sim.saveAll;
+          if(Array.isArray(sim.probes))S.probes=sim.probes;
+          if(typeof simSelectionAuto!=='undefined')simSelectionAuto=true;
+          if(typeof simSelection!=='undefined')simSelection={};
+          if(typeof saveSimSettings==='function')saveSimSettings();
+          if(typeof renderAnalysisPanel==='function')renderAnalysisPanel();
+          if(typeof renderFormulaList==='function')renderFormulaList();
+          if(typeof renderProbeList==='function')renderProbeList();
+        }
         // View is NOT restored from import — open with zoom-to-fit instead.
         cancelWire();renderAll();renderProps();
         zoomToFit();

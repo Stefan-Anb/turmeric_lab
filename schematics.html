@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SchematicForge</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔌</text></svg>">
 <link rel="stylesheet" href="css/styles.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.min.css">
 </head>
@@ -177,6 +178,7 @@
         <label class="sim-label">Analysis</label>
         <select id="sim-analysis-type" class="sim-select" onchange="onAnalysisTypeChange(this)">
           <option value="tran">Transient (.tran)</option>
+          <option value="ac">AC sweep (.ac)</option>
           <option value="dc">DC sweep (.dc)</option>
           <option value="op">Operating point (.op)</option>
           <option value="manual">Manual directive</option>

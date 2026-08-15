@@ -159,7 +159,7 @@ const CD={
     draw(g,v){
       const ig=el('g',{transform:'rotate(180)'});g.appendChild(ig);
       L(ig,-40,0,-12,0,'comp-pin');
-      PY(ig,'-12,0 12,-12 12,12','comp-body');LE(ig,12,-12,12,12,'comp-body');
+      PY(ig,'12,0 -12,-12 -12,12','comp-body');LE(ig,12,-12,12,12,'comp-body');
       L(ig,12,0,40,0,'comp-pin');
         T(g,0,-18,v.label||'D','comp-label');T(g,0,30,v.value||'','comp-value');
     }
@@ -170,7 +170,7 @@ const CD={
     pins:[{x:-40,y:0,n:'A'},{x:40,y:0,n:'K'}],
     draw(g,v){
       L(g,-40,0,-12,0,'comp-pin');
-      const t=PY(g,'-12,0 12,-12 12,12','comp-body');t.style.stroke='#ff9040';t.style.fill='#1a0800';
+      const t=PY(g,'12,0 -12,-12 -12,12','comp-body');t.style.stroke='#ff9040';t.style.fill='#1a0800';
       const b=LE(g,12,-12,12,12,'comp-body');b.style.stroke='#ff9040';
       L(g,12,0,40,0,'comp-pin');
       const a1=LE(g,16,-10,24,-20,'comp-pin');a1.style.stroke='#ff9040';
@@ -311,6 +311,11 @@ const CD={
       mode:{l:'Mode',type:'enum',options:[{v:'DC',l:'DC'},{v:'AC',l:'AC'},{v:'PULSE',l:'Pulse'},{v:'BEHAV',l:'Behavioural'}]},
       meas:{l:'Show',type:'enum',options:[{v:'V',l:'Voltage'},{v:'I',l:'Current'}]},
       label:{l:'Reference'},
+      // Small-signal AC excitation for a .ac analysis. Independent of Mode above
+      // (which shapes the transient waveform) — SPICE sources carry both at
+      // once, e.g. "V1 n1 n2 DC 0 AC 1 SIN(...)".
+      ac_mag:{l:'.ac magnitude (opt.)'},
+      ac_phase:{l:'.ac phase (deg, opt.)'},
       // DC
       value:{l:'Voltage (V)',modes:['DC']},
       // AC params

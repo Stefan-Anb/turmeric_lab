@@ -39,7 +39,8 @@ var simSeriesColor={};
 var simAnalysis={
   type:'tran',
   tran:{tstep:'10u',tstop:'5m',tstart:'',tmax:'',uic:false},
-  dc:{src:'',start:'0',stop:'5',step:'0.1',use2:false,src2:'',start2:'0',stop2:'5',step2:'1'}
+  dc:{src:'',start:'0',stop:'5',step:'0.1',use2:false,src2:'',start2:'0',stop2:'5',step2:'1'},
+  ac:{sweep:'dec',pts:'20',fstart:'1',fstop:'1Meg'}
 };
 var simFormulas=[];        // [{name,expr,on}]
 
@@ -52,6 +53,7 @@ function loadSimSettings(){
       simAnalysis.type=st.analysis.type||simAnalysis.type;
       if(st.analysis.tran)for(var k in st.analysis.tran)simAnalysis.tran[k]=st.analysis.tran[k];
       if(st.analysis.dc)for(var k2 in st.analysis.dc)simAnalysis.dc[k2]=st.analysis.dc[k2];
+      if(st.analysis.ac)for(var k3 in st.analysis.ac)simAnalysis.ac[k3]=st.analysis.ac[k3];
     }
     if(Array.isArray(st.formulas))simFormulas=st.formulas;
     if(typeof st.directives==='string'){
@@ -77,10 +79,16 @@ function saveSimSettings(){
 // NGSpice syntax (see the ngspice manual, ch. 11 "Analyses and output control"):
 //   .tran Tstep Tstop [Tstart [Tmax]] [UIC]
 //   .dc   Srcnam Vstart Vstop Vincr [Src2 Start2 Stop2 Incr2]
+//   .ac   dec|oct|lin Points/Nd/No Fstart Fstop
 function buildAnalysisDirective(){
   var a=simAnalysis;
   if(a.type==='manual')return '';
   if(a.type==='op')return '.op';
+  if(a.type==='ac'){
+    var ac=a.ac;
+    if(!ac.fstart||!ac.fstop)return '';
+    return '.ac '+(ac.sweep||'dec')+' '+(ac.pts||'10')+' '+ac.fstart+' '+ac.fstop;
+  }
   if(a.type==='dc'){
     var d=a.dc;
     if(!d.src)return '';
@@ -184,6 +192,16 @@ function renderAnalysisPanel(){
         fld('dc.start2','Start 2',a.dc.start2,'0')+fld('dc.stop2','Stop 2',a.dc.stop2,'5')+fld('dc.step2','Increment 2',a.dc.step2,'1')+
         '</div>';
     }
+  }else if(a.type==='ac'){
+    html+='<div class="sim-field"><label>Sweep type</label><select data-af="ac.sweep">'+
+      ['dec','oct','lin'].map(function(s){return '<option value="'+s+'"'+(a.ac.sweep===s?' selected':'')+'>'+s+'</option>';}).join('')+
+      '</select></div>'+
+      '<div class="sim-grid">'+
+      fld('ac.pts',a.ac.sweep==='lin'?'Points':'Points/'+(a.ac.sweep==='oct'?'octave':'decade'),a.ac.pts,'20')+
+      fld('ac.fstart','Start freq (Hz)',a.ac.fstart,'1')+
+      fld('ac.fstop','Stop freq (Hz)',a.ac.fstop,'1Meg')+
+      '</div>'+
+      '<div class="sim-hint-text">Small-signal frequency sweep — give at least one source a ".ac magnitude" (in its properties) so it excites the circuit.</div>';
   }else if(a.type==='op'){
     html+='<div class="sim-hint-text">Operating point only — the results are shown as a value table.</div>';
   }else{
@@ -660,10 +678,15 @@ function plotResult(result){
   simXUnit=xUnit;
   var series=[{label:xLabel,value:function(u,v){return fmtEng(v,6,xUnit);}}];
   simSeriesColor={};
+  // Current series get their own y axis (y2, right-hand side) so a plot mixing
+  // V(...) and I(...) doesn't squash both onto one shared scale.
+  var hasCurrent=false;
   for(var k=0;k<ser.names.length;k++){
     var col=SIM_PALETTE[k%SIM_PALETTE.length];
     simSeriesColor[String(ser.names[k]).toLowerCase()]=col;
-    series.push({label:ser.names[k]+(isComplex?' |mag|':''),stroke:col,width:2,
+    var isCur=/^i\(/i.test(ser.names[k])||/^@/.test(ser.names[k]);
+    if(isCur)hasCurrent=true;
+    series.push({label:ser.names[k]+(isComplex?' |mag|':''),stroke:col,width:2,scale:isCur?'y2':'y',
       value:function(u,v){return fmtEng(v,6);}});
   }
   var opts={
@@ -678,6 +701,10 @@ function plotResult(result){
       y:{range:function(u,dMin,dMax){
         if(simYFit)return [simYFit[0],simYFit[1]];
         return uPlot.rangeNum(dMin,dMax,0.1,true);
+      }},
+      y2:{range:function(u,dMin,dMax){
+        if(simYFit2)return [simYFit2[0],simYFit2[1]];
+        return uPlot.rangeNum(dMin,dMax,0.1,true);
       }}
     },
     cursor:{drag:{x:true,y:true,uni:8}},
@@ -690,17 +717,21 @@ function plotResult(result){
        values:isFreq
          ?function(u,ticks){return ticks.map(function(t){return fmtEng(t,4,xUnit);});}
          :function(u,ticks){return axisValuesSI(u,ticks,'x',xUnit);}},
-      {stroke:'#7a92a8',grid:{stroke:'#1c2730'},ticks:{stroke:'#1c2730'},
-       values:function(u,ticks){return axisValuesSI(u,ticks,'y','');}}
+      {scale:'y',stroke:'#7a92a8',grid:{stroke:'#1c2730'},ticks:{stroke:'#1c2730'},
+       values:function(u,ticks){return axisValuesSI(u,ticks,'y',hasCurrent?'V':'');}}
     ]
   };
+  if(hasCurrent){
+    opts.axes.push({scale:'y2',side:1,stroke:'#7a92a8',grid:{show:false},ticks:{stroke:'#1c2730'},
+      values:function(u,ticks){return axisValuesSI(u,ticks,'y2','A');}});
+  }
   var data=[xVals].concat(ser.datas);
   container.innerHTML='';
   if(simPlot){simPlot.destroy();simPlot=null;}
-  simYFit=null;
+  simYFit=null;simYFit2=null;
   simPlot=new uPlot(opts,data,container);
   // Double-click is uPlot's "reset zoom" — drop the manual vertical fit too.
-  container.addEventListener('dblclick',function(){simYFit=null;});
+  container.addEventListener('dblclick',function(){simYFit=null;simYFit2=null;});
   applySignalColors();
 }
 
@@ -828,7 +859,7 @@ function simTooltipPlugin(){
       },
       setCursor:function(u){if(tip)show(u);},
       // A drag-zoom is an explicit user range — drop the manual vertical fit.
-      setSelect:function(u){if(u.select&&u.select.height>0)simYFit=null;},
+      setSelect:function(u){if(u.select&&u.select.height>0){simYFit=null;simYFit2=null;}},
       destroy:function(){if(tip&&tip.parentNode)tip.parentNode.removeChild(tip);tip=null;}
     }
   };
@@ -838,6 +869,7 @@ function simTooltipPlugin(){
 // Horizontal fit resets the x range to the full data range; vertical fit scales
 // y to the data that is actually visible in the current x window.
 var simYFit=null;   // [min,max] override for the y scale, set by simFitY()
+var simYFit2=null;  // same, for the secondary (current) y2 scale
 
 function simFitX(){
   if(!simPlot||!simPlot.data||!simPlot.data[0]||!simPlot.data[0].length)return;
@@ -850,25 +882,35 @@ function simFitY(xlo,xhi){
   var xr=simPlot.scales.x;
   var lo=(xlo!=null)?xlo:((xr&&xr.min!=null)?xr.min:xs[0]);
   var hi=(xhi!=null)?xhi:((xr&&xr.max!=null)?xr.max:xs[xs.length-1]);
-  var min=Infinity,max=-Infinity;
+  // Each series carries its own scale key ('y' or 'y2' — see plotResult), so
+  // the two axes are fit independently from the data actually assigned to them.
+  var range={y:{min:Infinity,max:-Infinity},y2:{min:Infinity,max:-Infinity}};
   for(var s=1;s<simPlot.data.length;s++){
-    if(simPlot.series[s]&&simPlot.series[s].show===false)continue;
+    var ser=simPlot.series[s];
+    if(ser&&ser.show===false)continue;
+    var scaleKey=(ser&&ser.scale)||'y';
+    var r=range[scaleKey];if(!r)continue;
     var d=simPlot.data[s];
     for(var i=0;i<d.length;i++){
       if(xs[i]<lo||xs[i]>hi)continue;
       var v=d[i];
       if(v==null||!isFinite(v))continue;
-      if(v<min)min=v;
-      if(v>max)max=v;
+      if(v<r.min)r.min=v;
+      if(v>r.max)r.max=v;
     }
   }
-  if(!isFinite(min)||!isFinite(max))return;
-  if(min===max){var pad0=Math.abs(min)*0.1||1;min-=pad0;max+=pad0;}
-  else{var pad=(max-min)*0.05;min-=pad;max+=pad;}
-  // Set both: setScale applies it now, simYFit makes it survive the next
+  function pad(r){
+    if(!isFinite(r.min)||!isFinite(r.max))return null;
+    var min=r.min,max=r.max;
+    if(min===max){var pad0=Math.abs(min)*0.1||1;min-=pad0;max+=pad0;}
+    else{var p=(max-min)*0.05;min-=p;max+=p;}
+    return [min,max];
+  }
+  var yr=pad(range.y),y2r=pad(range.y2);
+  // Set both: setScale applies it now, simYFit(2) makes it survive the next
   // auto-range commit (uPlot re-ranges y whenever anything else changes).
-  simYFit=[min,max];
-  simPlot.setScale('y',{min:min,max:max});
+  if(yr){simYFit=yr;simPlot.setScale('y',{min:yr[0],max:yr[1]});}
+  if(y2r){simYFit2=y2r;simPlot.setScale('y2',{min:y2r[0],max:y2r[1]});}
 }
 // Both axes to the full data range (the y pass gets the window explicitly, as
 // the x scale is only committed on the next frame).
@@ -1012,25 +1054,25 @@ function selectProbeVector(pr,on){
 // If either endpoint is ground/invalid or both are the same net, it degrades
 // to a single-ended probe of the meaningful node.
 function addDiffProbe(x1,y1,x2,y2){
-  var a=_probeNet(x1,y1); // reference (subtrahend)
-  var b=_probeNet(x2,y2); // measured
+  var a=_probeNet(x1,y1); // measured (minuend) - drag START
+  var b=_probeNet(x2,y2); // reference (subtrahend) - drag END
   var aOk=a&&a!=='0', bOk=b&&b!=='0';
   if(!S.probes)S.probes=[];
   if(!aOk&&!bOk){hint('No nets to probe');return;}
   if(!aOk||!bOk||a===b){
-    var net=bOk?b:a;
+    var net=aOk?a:b;
     dropAutoSelection();
     if(!S.probes.some(function(p){return p.kind==='V'&&p.net===net;})){S.probes.push({kind:'V',net:net});}
     setSelected('v('+net+')',true);
     hint('Probe added: V('+net+')');
     _afterProbeChange();return;
   }
-  if(S.probes.some(function(p){return p.kind==='Vd'&&p.p===b&&p.n===a;})){
+  if(S.probes.some(function(p){return p.kind==='Vd'&&p.p===a&&p.n===b;})){
     hint('Differential probe already present');return;
   }
   dropAutoSelection();
-  S.probes.push({kind:'Vd',p:b,n:a});
-  hint('Probe added: V('+b+')-V('+a+')');
+  S.probes.push({kind:'Vd',p:a,n:b});
+  hint('Probe added: V('+a+')-V('+b+')');
   _afterProbeChange();
 }
 

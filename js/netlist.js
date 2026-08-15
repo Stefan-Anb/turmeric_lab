@@ -481,10 +481,18 @@ function generateNetlist(){
       // get n0xx names instead of resolving to null and shorting the source.
       var net1=getNetNameWithTempNames(px1,py1);
       var net2=getNetNameWithTempNames(px2,py2);
+      // Small-signal AC excitation for a .ac analysis, independent of the
+      // transient waveform selected via Mode above (the "AC mag [phase]"
+      // spec sits between the DC value and the transient spec in SPICE).
+      var acSpec='';
+      if(mode!=='BEHAV'&&c.ac_mag!==undefined&&String(c.ac_mag).trim()!==''){
+        var acPhase=String(c.ac_phase||'').trim();
+        acSpec='AC '+c.ac_mag+(acPhase&&acPhase!=='0'?' '+acPhase:'');
+      }
       var line='';
       if(mode==='DC'){
         var val=c.value||def.val||'1';
-        line=dev+' '+net1+' '+net2+' DC '+val;
+        line=dev+' '+net1+' '+net2+' DC '+val+(acSpec?' '+acSpec:'');
       }else if(mode==='AC'){
         var vo=c.ac_offset||'0';
         var va=c.ac_amplitude||'1';
@@ -492,7 +500,7 @@ function generateNetlist(){
         var td=c.ac_tdelay||'0';
         var theta=c.ac_theta||'0';
         var phi=c.ac_phi||'0';
-        line=dev+' '+net1+' '+net2+' SIN('+vo+' '+va+' '+freq+' '+td+' '+theta+' '+phi+')';
+        line=dev+' '+net1+' '+net2+(acSpec?' '+acSpec:'')+' SIN('+vo+' '+va+' '+freq+' '+td+' '+theta+' '+phi+')';
       }else if(mode==='PULSE'){
         var v1=c.pulse_vinit||'0';
         var v2=c.pulse_von||'1';
@@ -502,7 +510,7 @@ function generateNetlist(){
         var pw=c.pulse_ton||'1e-3';
         var per=c.pulse_tperiod||'1e-3';
         var np=c.pulse_ncycles||'1';
-        line=dev+' '+net1+' '+net2+' PULSE('+v1+' '+v2+' '+td+' '+tr+' '+tf+' '+pw+' '+per+' '+np+')';
+        line=dev+' '+net1+' '+net2+(acSpec?' '+acSpec:'')+' PULSE('+v1+' '+v2+' '+td+' '+tr+' '+tf+' '+pw+' '+per+' '+np+')';
       }else if(mode==='BEHAV'){
         var eq=c.beh_eq||'0';
         line=dev+' '+net1+' '+net2+' cur = \''+eq+'\'';

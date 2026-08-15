@@ -1,5 +1,4 @@
 * Leistungs-Probe (P = U*I) als eigenes Probe-Werkzeug (aktuell nur per Formel)
-* AC-Analyse ebenfalls grafisch konfigurierbar machen (aktuell nur .tran/.dc/.op)
 * PWM-Generator: Totzeit ist über verschobene Vergleichsschwellen gelöst, weil
   der WASM-Build kein `delay()` kennt. Falls eine spätere Engine-Version die
   Funktion mitbringt, kann das Referenzmodell direkt genutzt werden.
@@ -17,14 +16,6 @@
 * Cursor-Feature im Plot
 * Signalliste collapsen auch wenn alle gespeichert werden
 * Durchlaufzeit der Simulation anzeigen
-* Bauteile beim kopieren neu benennen (Duplikate vermeiden)
 * Irreführende Bauteilbezeichnungen entfernen/korrigieren
-* Diodenmodell noch nicht korrekt?
-* ncycles standardmäßig 0
 * alle Platzhalter entfernen oder setzen -> kann verwirren
-* getrennte Skalierung von Spannung und Strom
 * Automatische/Variable Stepsize?
-* Simulations-Statement in File speichern
-* Diodenmodell Anode/Kathode vertauscht
-* Beim proben von Spannungsdifferenzen die Logik umkehren (erster Probe ist der obere Wert)
-* Favicon
