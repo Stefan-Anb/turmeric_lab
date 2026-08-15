@@ -31,11 +31,11 @@
   <button class="tb-btn" onclick="exportSVG()">SAVE</button>
   <button class="tb-btn" onclick="importSVG()">LOAD</button>
   <button class="tb-btn" onclick="showNetlist()">NETLIST</button>
-  <button class="tb-btn" id="btn-sim" onclick="toggleSimView()">SIMULATE</button>
   <button class="tb-btn" onclick="zoomToFit()">
     <svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 4V1h3M8 1h3v3M11 8v3H8M4 11H1V8" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>ZOOM FIT
   </button>
   <div class="mode-indicator">MODE: <span id="mode-label">SELECT</span></div>
+  <button class="tb-btn tb-btn-sim" id="btn-sim" onclick="simulateButtonClick()">SIMULATION</button>
 </div>
 
 <div id="main">
@@ -175,20 +175,27 @@
         <button class="modal-close" onclick="closeSimPanel()" title="Close simulation settings (component properties stay reachable)">&times;</button>
       </div>
       <div class="sim-row">
-        <label class="sim-label">Analysis</label>
-        <select id="sim-analysis-type" class="sim-select" onchange="onAnalysisTypeChange(this)">
-          <option value="tran">Transient (.tran)</option>
-          <option value="ac">AC sweep (.ac)</option>
-          <option value="dc">DC sweep (.dc)</option>
-          <option value="op">Operating point (.op)</option>
-          <option value="manual">Manual directive</option>
-        </select>
-        <div id="sim-analysis-fields"></div>
-        <div class="sim-hint-text">Card: <code id="sim-directive-preview"></code></div>
-      </div>
-      <div class="sim-row">
-        <label class="sim-label">Additional directives <span class="sim-sub">(.model, .ic, .options, .ac …)</span></label>
-        <textarea id="sim-directives" class="sim-directives" spellcheck="false"></textarea>
+        <div class="sim-label sim-collapsible-hdr" id="sim-config-hdr" onclick="toggleSimConfigCollapse()">
+          <span id="sim-config-caret">▸</span> Simulation configuration
+        </div>
+        <div id="sim-config-body" style="display:none">
+          <div class="sim-field-block">
+            <label class="sim-label">Analysis</label>
+            <select id="sim-analysis-type" class="sim-select" onchange="onAnalysisTypeChange(this)">
+              <option value="tran">Transient (.tran)</option>
+              <option value="ac">AC sweep (.ac)</option>
+              <option value="dc">DC sweep (.dc)</option>
+              <option value="op">Operating point (.op)</option>
+              <option value="manual">Manual directive</option>
+            </select>
+            <div id="sim-analysis-fields"></div>
+            <div class="sim-hint-text">Card: <code id="sim-directive-preview"></code></div>
+          </div>
+          <div class="sim-field-block">
+            <label class="sim-label">Additional directives <span class="sim-sub">(.model, .ic, .options, .ac …)</span></label>
+            <textarea id="sim-directives" class="sim-directives" spellcheck="false"></textarea>
+          </div>
+        </div>
       </div>
       <div class="sim-row">
         <label class="sim-label">Plotted signals <span class="sim-sub">(probe mode P: pin = current, wire = voltage, drag = differential)</span></label>

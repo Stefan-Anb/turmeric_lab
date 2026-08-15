@@ -1821,7 +1821,10 @@ var SCHEMA_VERSION=1;
 function saveSchematic(){
   try{
     // View (pan/zoom) is intentionally not saved — schematic always opens with zoom-to-fit.
-    var state={version:SCHEMA_VERSION,components:S.components,wires:S.wires,junctions:S.junctions,nextId:S.nextId,customComponents:customComponents};
+    // Plotted signals (probes) are carried over too, so a reload doesn't quietly
+    // empty the plot config — see loadSchematic() and simSelectionAuto.
+    var state={version:SCHEMA_VERSION,components:S.components,wires:S.wires,junctions:S.junctions,nextId:S.nextId,customComponents:customComponents,
+      probes:S.probes||[]};
     localStorage.setItem('schematic_state',JSON.stringify(state));
   }catch(e){console.warn('Failed to save schematic',e);}
 }
@@ -1839,6 +1842,7 @@ function loadSchematic(){
     S.junctions=state.junctions||[];
     S.nextId=state.nextId||1;
     S.selected=[];
+    S.probes=Array.isArray(state.probes)?state.probes:[];
     // View is NOT restored — the schematic will be zoom-to-fit after render.
     if(state.customComponents){
       customComponents=state.customComponents;

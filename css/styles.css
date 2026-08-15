@@ -17,8 +17,13 @@ body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);displ
 .tb-btn{height:30px;padding:0 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:3px;color:var(--text-mid);font-family:'Rajdhani',sans-serif;font-size:12px;font-weight:600;letter-spacing:.5px;cursor:pointer;transition:all .15s;display:flex;align-items:center;gap:5px;}
 .tb-btn:hover{border-color:var(--border-hi);color:var(--text-hi);background:var(--bg-hover);}
 .tb-btn.active{border-color:var(--accent);color:var(--accent);background:#00c8ff12;}
-.mode-indicator{margin-left:auto;font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--text-lo);letter-spacing:1px;}
+.mode-indicator{font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--text-lo);letter-spacing:1px;}
 .mode-indicator span{color:var(--accent);}
+/* Standalone, right-aligned and colour-highlighted so the entry point into
+   the simulation view stands out from the rest of the toolbar. */
+.tb-btn-sim{margin-left:auto;border-color:var(--accent-dim);color:var(--accent);background:#00c8ff14;font-weight:700;}
+.tb-btn-sim:hover{border-color:var(--accent);color:var(--accent);background:#00c8ff22;}
+.tb-btn-sim.active{background:var(--accent);border-color:var(--accent);color:#04141c;}
 
 #main{flex:1;display:flex;overflow:hidden;}
 
@@ -164,6 +169,10 @@ body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);displ
 .sim-raw-panel{border:1px solid var(--border);border-radius:3px;padding:8px 10px;background:var(--bg-card);}
 .sim-raw-toggle{cursor:pointer;user-select:none;}
 .sim-raw-toggle:hover{color:var(--text-hi);}
+.sim-collapsible-hdr{cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px;}
+.sim-collapsible-hdr:hover{color:var(--text-hi);}
+.sim-field-block{display:flex;flex-direction:column;gap:6px;margin-top:10px;}
+.sim-field-block:first-child{margin-top:8px;}
 .sim-raw-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:4px 12px;margin-top:6px;}
 .sim-raw-item{display:flex;align-items:center;gap:6px;font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--text-hi);cursor:pointer;}
 .sim-raw-item input{accent-color:var(--accent);}

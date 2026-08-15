@@ -5,8 +5,10 @@
 // CDN as an ES module, and uPlot for an interactive (zoom / pan / cursor /
 // legend) time- and frequency-domain plot. Net selection for the plot is driven
 // by the existing Probe mode: clicking a net or pin in probe mode toggles that
-// node into S.probes; only probed nets are plotted (or all node voltages when
-// none are selected).
+// node into S.probes; only probed/ticked nets are plotted. The plot starts
+// empty until the user probes something, ticks a vector, or presses one of the
+// "All …" buttons — unless a previous session (or the loaded SVG) already had
+// a selection, which is carried over.
 //
 // Requires a network connection on first run to fetch the WASM engine. The
 // engine and uPlot can later be vendored locally for offline use.
@@ -21,10 +23,13 @@ var simLastResult=null;   // last result, for re-plot when probe selection chang
 // (lowercase) -> true. Canvas probes and the vector picker are two ways of
 // editing the same set, and it survives across simulation runs — a new run only
 // drops entries whose vector no longer exists (silently, the netlist may have
-// changed). `simSelectionAuto` means "the user has not chosen anything yet", in
-// which case the set is re-derived from each result as "all node voltages".
+// changed). `simSelectionAuto` means "derive the set from S.probes/ticked
+// vectors as usual, don't auto-fill it with anything" — it used to mean "auto-
+// select every node voltage", but that surprised more than it helped, so a
+// fresh schematic (no saved probes in this session or the loaded SVG) now
+// starts with a deliberately empty plot instead.
 var simSelection={};
-var simSelectionAuto=true;
+var simSelectionAuto=false;
 var simViewActive=false;   // split-screen plot pane open?
 var simPanelOpen=false;    // simulation settings shown in the properties sidebar?
 var simXUnit='';           // unit of the x axis of the current plot ('s', 'Hz', …)
@@ -1253,7 +1258,8 @@ function clearProbes(){
   _afterProbeChange();
 }
 
-// The default set: every node voltage of the last (and each following) run.
+// Every node voltage of the last (and each following) run, kept in sync as
+// the netlist changes — an explicit opt-in, no longer the out-of-the-box default.
 function selectAllNodeVoltages(){
   S.probes=[];
   simSelection={};
@@ -1351,6 +1357,16 @@ function toggleSimView(){
   setSimView(!simViewActive);
 }
 
+// The toolbar SIMULATION button: opens the view (same as toggleSimView) and,
+// only on that opening transition, kicks off a run right away — so a click
+// gets you straight to a result instead of open-then-hunt-for-Run. Re-clicking
+// to close (or to bring the settings page back) does not re-run.
+function simulateButtonClick(){
+  var wasActive=simViewActive;
+  toggleSimView();
+  if(!wasActive)runSimulation();
+}
+
 function setSimView(on){
   simViewActive=!!on;
   var pane=document.getElementById('sim-pane');
@@ -1416,6 +1432,21 @@ function showSimPanel(){ setSimPanel(true); }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',attach);else attach();
 })();
 
+// Analysis type / directives: folded away by default, since day-to-day work is
+// mostly about probing signals, not re-configuring the analysis card. Session-
+// only (not persisted) — it's a display preference, not part of the sim setup.
+var simConfigCollapsed=true;
+function toggleSimConfigCollapse(){
+  simConfigCollapsed=!simConfigCollapsed;
+  applySimConfigCollapse();
+}
+function applySimConfigCollapse(){
+  var body=document.getElementById('sim-config-body');
+  var caret=document.getElementById('sim-config-caret');
+  if(body)body.style.display=simConfigCollapsed?'none':'block';
+  if(caret)caret.textContent=simConfigCollapsed?'▸':'▾';
+}
+
 // ═══ INIT ═══
 (function initSimSettings(){
   function attach(){
@@ -1425,6 +1456,7 @@ function showSimPanel(){ setSimPanel(true); }
     renderAnalysisPanel();
     renderFormulaList();
     renderProbeList();
+    applySimConfigCollapse();
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',attach);else attach();
 })();
