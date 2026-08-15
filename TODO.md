@@ -12,4 +12,3 @@
 
 * Step Parameter, Multisimulation, Graphenschar im Plot, Auswahl einzelner Graphen, Berechnung von Kennlinien aus Multisimulation
 * alle Platzhalter entfernen oder setzen -> kann verwirren
-* Farben in Plots fixen, wenn Signale entfernt werden nicht die anderen Farben ändern

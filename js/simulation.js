@@ -42,6 +42,11 @@ var simXUnit='';           // unit of the x axis of the current plot ('s', 'Hz',
 // lowercased series label.
 var SIM_PALETTE=['#00c8ff','#ff9040','#40ff90','#ff5f87','#c080ff','#ffd040','#5fd0ff','#ff6b35'];
 var simSeriesColor={};
+// Sticky colour assignment: a signal keeps its colour for as long as it stays
+// plotted, even while other signals are added/removed around it. See
+// assignSimColors() — a colour is only freed once its signal actually leaves
+// the plotted set, and a newly added signal takes the first free one.
+var simColorAssign={};
 
 // Analysis configuration (GUI-built .tran / .dc directive) and user formulas.
 // Both are persisted separately from the schematic so they survive a reload.
@@ -1495,6 +1500,30 @@ function renderMeasureModal(){
   });
 }
 
+// Give every currently-plotted signal (by lowercased key) a colour, reusing
+// whatever it already has and handing newly-added keys the first slot in
+// SIM_PALETTE that isn't currently taken. A key that drops out of `keys`
+// frees its colour immediately, so the *next* addition can reuse that slot —
+// but signals that stay plotted never have their colour reassigned just
+// because some other signal was removed.
+function assignSimColors(keys){
+  var active={};
+  for(var i=0;i<keys.length;i++)active[keys[i]]=true;
+  for(var k in simColorAssign)if(!active[k])delete simColorAssign[k];
+  for(var j=0;j<keys.length;j++){
+    var key=keys[j];
+    if(simColorAssign[key])continue;
+    var used={};
+    for(var kk in simColorAssign)used[simColorAssign[kk]]=true;
+    var col=null;
+    for(var p=0;p<SIM_PALETTE.length;p++){if(!used[SIM_PALETTE[p]]){col=SIM_PALETTE[p];break;}}
+    // More concurrently-plotted signals than palette colours: fall back to a
+    // cycling repeat rather than leaving it uncoloured.
+    if(!col)col=SIM_PALETTE[Object.keys(simColorAssign).length%SIM_PALETTE.length];
+    simColorAssign[key]=col;
+  }
+}
+
 function plotResult(result){
   var container=document.getElementById('sim-plot');
   if(!container)return;
@@ -1534,13 +1563,15 @@ function plotResult(result){
   var xLabel=isFreq?'Frequency':(xVar.type==='time'?'Time':(xVar.name||'x'));
   simXUnit=xUnit;
   var series=[{label:xLabel,value:function(u,v){return fmtEng(v,6,xUnit);}}];
+  var serKeys=ser.names.map(function(n){return String(n).toLowerCase();});
+  assignSimColors(serKeys);
   simSeriesColor={};
   // Current series get their own y axis (y2, right-hand side) so a plot mixing
   // V(...) and I(...) doesn't squash both onto one shared scale.
   var hasCurrent=false;
   for(var k=0;k<ser.names.length;k++){
-    var col=SIM_PALETTE[k%SIM_PALETTE.length];
-    simSeriesColor[String(ser.names[k]).toLowerCase()]=col;
+    var col=simColorAssign[serKeys[k]];
+    simSeriesColor[serKeys[k]]=col;
     var isCur=/^i\(/i.test(ser.names[k])||/^@/.test(ser.names[k]);
     if(isCur)hasCurrent=true;
     series.push({label:ser.names[k]+(isComplex?' |mag|':''),stroke:col,width:2,scale:isCur?'y2':'y',
@@ -2140,7 +2171,13 @@ function selectAllSignals(){
 
 function _probeLabel(pr){
   if(pr.kind==='I')return currentProbeLabel(pr);
-  return pr.kind==='Vd'?('V('+pr.p+')−V('+pr.n+')'):('V('+pr.net+')');
+  // Must match the series name buildSeriesFromResult() actually plots
+  // (plain ASCII hyphen) — this label doubles as the sim-chip's
+  // data-siglabel, which applySignalColors() looks up in simSeriesColor by
+  // exact (lowercased) string. A fancier typographic minus here used to make
+  // that lookup miss, so a differential probe's chip never got its swatch/dot
+  // coloured even though the curve itself did.
+  return pr.kind==='Vd'?('V('+pr.p+')-V('+pr.n+')'):('V('+pr.net+')');
 }
 
 // One chip per plotted signal: the canvas probes plus any extra vector ticked
