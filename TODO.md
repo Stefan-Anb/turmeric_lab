@@ -13,9 +13,4 @@
 * Measurement-Statements konfigurierbar und UI dafür
 * Step Parameter, Multisimulation, Graphenschar im Plot, Auswahl einzelner Graphen, Berechnung von Kennlinien aus Multisimulation
 * Schneller zugänglicher Run Button, besser ersichtlicher Ablauf der Simulation -> workerthread + live update der graphen wenn möglich
-* Cursor-Feature im Plot
-* Signalliste collapsen auch wenn alle gespeichert werden
-* Durchlaufzeit der Simulation anzeigen
-* Irreführende Bauteilbezeichnungen entfernen/korrigieren
 * alle Platzhalter entfernen oder setzen -> kann verwirren
-* Automatische/Variable Stepsize?

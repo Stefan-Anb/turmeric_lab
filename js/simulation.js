@@ -38,7 +38,7 @@ var simSeriesColor={};
 // Both are persisted separately from the schematic so they survive a reload.
 var simAnalysis={
   type:'tran',
-  tran:{tstep:'10u',tstop:'5m',tstart:'',tmax:'',uic:false},
+  tran:{tstep:'10u',tstop:'5m',tstart:'',tmax:'',uic:false,trtol:'7'},
   dc:{src:'',start:'0',stop:'5',step:'0.1',use2:false,src2:'',start2:'0',stop2:'5',step2:'1'},
   ac:{sweep:'dec',pts:'20',fstart:'1',fstop:'1Meg'}
 };
@@ -106,6 +106,21 @@ function buildAnalysisDirective(){
   return line;
 }
 
+// ngspice always steps the transient analysis with a variable internal
+// timestep (LTE-based); Tstep above is only the output raster, not the actual
+// integration step. TRTOL scales how much local truncation error the adaptive
+// step control tolerates per step — higher = larger, coarser steps (faster
+// but less accurate), lower = smaller, finer steps. The ngspice default (and
+// a generally sensible one) is 7; expose it explicitly so it is documented in
+// the generated deck instead of relying on a silent engine default.
+function buildOptionsDirective(){
+  var a=simAnalysis;
+  if(a.type!=='tran')return '';
+  var trtol=a.tran.trtol;
+  if(!trtol||!a.tran.tstop)return '';
+  return '.options trtol='+trtol;
+}
+
 // Voltage/current sources available as a .dc sweep source, by SPICE name.
 function sweepableSources(){
   var refMap=(typeof buildSpiceRefMap==='function')?buildSpiceRefMap():{};
@@ -168,6 +183,7 @@ function renderAnalysisPanel(){
       fld('tran.tstop','Stop time',a.tran.tstop,'5m')+
       fld('tran.tstart','Start time (opt.)',a.tran.tstart,'0')+
       fld('tran.tmax','Max step (opt.)',a.tran.tmax,'')+
+      fld('tran.trtol','Timestep tolerance (TRTOL)',a.tran.trtol,'7','Controls ngspice\'s variable (adaptive) internal timestep — higher = larger/coarser steps, lower = smaller/finer steps. 7 is ngspice\'s own default.')+
       '</div>'+
       '<label class="sim-check"><input type="checkbox" data-af="tran.uic"'+(a.tran.uic?' checked':'')+'> UIC <span class="sim-sub">(use initial conditions, skip operating point)</span></label>';
   }else if(a.type==='dc'){
@@ -227,8 +243,10 @@ function updateDirectivePreview(){
   var el=document.getElementById('sim-directive-preview');
   if(!el)return;
   var d=buildAnalysisDirective();
-  el.textContent=d||'(none — add one in the directives box)';
-  el.classList.toggle('sim-preview-empty',!d);
+  var o=buildOptionsDirective();
+  var combined=[d,o].filter(Boolean).join('\n');
+  el.textContent=combined||'(none — add one in the directives box)';
+  el.classList.toggle('sim-preview-empty',!combined);
 }
 
 function onAnalysisTypeChange(sel){
@@ -249,6 +267,8 @@ function buildFullNetlist(){
   if(needsCurrents())lines.push(buildSaveLine());
   var analysis=buildAnalysisDirective();
   if(analysis)lines.push(analysis);
+  var options=buildOptionsDirective();
+  if(options)lines.push(options);
   if(directives)lines.push(directives);
   lines.push('.end');
   return lines.join('\n');
@@ -307,6 +327,7 @@ function runSimulation(){
       return;
     }
     simLastResult=result;
+    simCursors=[];   // a fresh run gets a fresh x grid — old cursor positions no longer apply
     // Carry the signal selection over to the new run: keep what still exists,
     // drop what the netlist no longer produces.
     reconcileSelection(result);
@@ -713,7 +734,7 @@ function plotResult(result){
     },
     cursor:{drag:{x:true,y:true,uni:8}},
     legend:{live:true},
-    plugins:[simTooltipPlugin()],
+    plugins:[simTooltipPlugin(),simCursorPlugin()],
     axes:[
       {stroke:'#7a92a8',grid:{stroke:'#1c2730'},ticks:{stroke:'#1c2730'},
        // A log frequency axis spans decades, so there each tick carries its own
@@ -734,8 +755,12 @@ function plotResult(result){
   if(simPlot){simPlot.destroy();simPlot=null;}
   simYFit=null;simYFit2=null;
   simPlot=new uPlot(opts,data,container);
-  // Double-click is uPlot's "reset zoom" — drop the manual vertical fit too.
-  container.addEventListener('dblclick',function(){simYFit=null;simYFit2=null;});
+  // Double-click is uPlot's "reset zoom" — drop the manual vertical fit and the
+  // measurement cursors too.
+  container.addEventListener('dblclick',function(){
+    simYFit=null;simYFit2=null;
+    clearSimCursors();
+  });
   applySignalColors();
 }
 
@@ -838,7 +863,11 @@ function simTooltipPlugin(){
       var s=u.series[i];
       if(s.show===false)continue;
       var val=u.data[i][idx];
-      html+='<div class="sim-tip-row"><span class="sim-tip-dot" style="background:'+(s.stroke||'#888')+'"></span>'+
+      // u.series[i].stroke is uPlot's own internal accessor by this point (not
+      // the plain hex string we passed in), so look the colour up in the map
+      // plotResult filled instead of reading it back off the series.
+      var col=simSeriesColor[String(s.label).toLowerCase()]||'#888';
+      html+='<div class="sim-tip-row"><span class="sim-tip-dot" style="background:'+col+'"></span>'+
         '<span class="sim-tip-lbl">'+esc(String(s.label))+'</span>'+
         '<span class="sim-tip-val">'+fmtEng(val,5)+'</span></div>';
     }
@@ -865,6 +894,124 @@ function simTooltipPlugin(){
       // A drag-zoom is an explicit user range — drop the manual vertical fit.
       setSelect:function(u){if(u.select&&u.select.height>0){simYFit=null;simYFit2=null;}},
       destroy:function(){if(tip&&tip.parentNode)tip.parentNode.removeChild(tip);tip=null;}
+    }
+  };
+}
+
+// ═══ MEASUREMENT CURSORS ═══
+// Two click-placed cursors ("1" and "2"), marked as vertical lines in the plot.
+// Once both are set, a small overlay bottom-right of the plot area reads out
+// Δx (time/frequency) and each visible series' value difference between them.
+// A third click rotates the pair: the old #2 becomes #1, the new click is #2.
+// simCursors holds up to two {idx} entries (data-array indices), oldest first.
+// It survives re-plotting the same run (ticking a signal, changing formulas)
+// since the x grid doesn't change, but is dropped whenever a fresh run's data
+// replaces it (see runSimulation) or the user double-clicks to reset the view.
+var simCursors=[];
+
+function clearSimCursors(){
+  if(!simCursors.length)return;
+  simCursors=[];
+  if(simPlot)renderSimCursorsUI(simPlot);
+}
+
+function addSimCursorClick(u,idx){
+  if(idx==null||!u.data[0]||u.data[0][idx]==null)return;
+  if(simCursors.length>=2)simCursors.shift();
+  simCursors.push({idx:idx});
+  renderSimCursorsUI(u);
+}
+
+// Nearest data index for a client-X coordinate, found directly from the x
+// scale instead of u.cursor.idx — that field is only refreshed on uPlot's own
+// (rAF-throttled) cursor pass, so reading it synchronously from a mouseup
+// handler can still see the position from before the last mousemove.
+function idxAtClientX(u,clientX){
+  var xs=u.data&&u.data[0];
+  if(!xs||!xs.length)return null;
+  var rect=u.over.getBoundingClientRect();
+  var val=u.posToVal(clientX-rect.left,'x');
+  if(val==null||!isFinite(val))return null;
+  if(val<=xs[0])return 0;
+  var last=xs.length-1;
+  if(val>=xs[last])return last;
+  var lo=0,hi=last;
+  while(hi-lo>1){
+    var mid=(lo+hi)>>1;
+    if(xs[mid]<val)lo=mid;else hi=mid;
+  }
+  return (val-xs[lo]<=xs[hi]-val)?lo:hi;
+}
+
+function renderSimCursorsUI(u){
+  if(!u||!u.over)return;
+  var markersEl=u.over.querySelector('.sim-cursor-markers');
+  var overlayEl=u.over.querySelector('.sim-cursor-overlay');
+  if(!markersEl||!overlayEl)return;
+  markersEl.innerHTML='';
+  for(var i=0;i<simCursors.length;i++){
+    var idx=simCursors[i].idx;
+    if(idx==null||!u.data[0]||u.data[0][idx]==null)continue;
+    var left=u.valToPos(u.data[0][idx],'x');
+    var m=document.createElement('div');
+    m.className='sim-cursor-line';
+    m.style.left=left+'px';
+    var tag=document.createElement('span');
+    tag.className='sim-cursor-tag';tag.textContent=String(i+1);
+    m.appendChild(tag);
+    markersEl.appendChild(m);
+  }
+  if(simCursors.length<2){overlayEl.style.display='none';overlayEl.innerHTML='';return;}
+  var i1=simCursors[0].idx,i2=simCursors[1].idx;
+  if(u.data[0][i1]==null||u.data[0][i2]==null){overlayEl.style.display='none';return;}
+  var x1=u.data[0][i1],x2=u.data[0][i2];
+  var dtLabel=(simXUnit==='Hz')?'Δf':'Δt';
+  var html='<div class="sim-cursor-hdr">1 → 2</div>'+
+    '<div class="sim-cursor-row sim-cursor-dt">'+esc(dtLabel)+': '+fmtEng(x2-x1,5,simXUnit)+'</div>';
+  for(var s=1;s<u.series.length;s++){
+    var ser=u.series[s];
+    if(ser.show===false)continue;
+    var d=u.data[s];
+    var v1=d?d[i1]:null,v2=d?d[i2]:null;
+    if(v1==null||v2==null||!isFinite(v1)||!isFinite(v2))continue;
+    // ser.stroke is uPlot's internal accessor, not the hex string — see the
+    // same note in simTooltipPlugin.
+    var col=simSeriesColor[String(ser.label).toLowerCase()]||'#888';
+    html+='<div class="sim-cursor-row"><span class="sim-cursor-dot" style="background:'+col+'"></span>'+
+      '<span class="sim-cursor-lbl">'+esc(String(ser.label))+'</span>'+
+      '<span class="sim-cursor-val">Δ'+fmtEng(v2-v1,5)+'</span></div>';
+  }
+  overlayEl.innerHTML=html;
+  overlayEl.style.display='block';
+}
+
+function simCursorPlugin(){
+  var downX=null,downY=null;
+  return {
+    hooks:{
+      init:function(u){
+        var markersEl=document.createElement('div');
+        markersEl.className='sim-cursor-markers';
+        var overlayEl=document.createElement('div');
+        overlayEl.className='sim-cursor-overlay';
+        overlayEl.style.display='none';
+        u.over.appendChild(markersEl);
+        u.over.appendChild(overlayEl);
+        // A plain click (no drag) drops/moves a measurement cursor. Distinguish
+        // it from a drag-zoom by the mouse travel between down and up, since
+        // uPlot's own drag-select swallows the click semantics otherwise.
+        u.over.addEventListener('mousedown',function(e){downX=e.clientX;downY=e.clientY;});
+        u.over.addEventListener('mouseup',function(e){
+          if(downX==null)return;
+          var dx=Math.abs(e.clientX-downX),dy=Math.abs(e.clientY-downY);
+          downX=null;downY=null;
+          if(dx>4||dy>4)return;   // was a drag-zoom, not a cursor click
+          var idx=idxAtClientX(u,e.clientX);
+          if(idx==null)return;
+          addSimCursorClick(u,idx);
+        });
+      },
+      draw:function(u){renderSimCursorsUI(u);}
     }
   };
 }
