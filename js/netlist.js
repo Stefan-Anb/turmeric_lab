@@ -180,12 +180,22 @@ function getTempNetName(wireId){
 // Single source of truth for the instance name each component gets in the
 // netlist. generateNetlist() uses it for the emitted cards, the probe code uses
 // it to build current-vector names — so both can never drift apart.
+// Sanitized reference stem for a transformer instance's two internal coupled
+// inductors (LxxxP/LxxxS) and coupling statement (KxxxT) — one place so
+// generateNetlist, buildSaveVectors, buildSpiceRefMap and currentVectorsForPin
+// never drift apart on the exact vector names (a transformer isn't a single
+// SPICE device, so it doesn't fit the one-ref-per-component map below).
+function transformerRef(c){
+  return (c.label||'TR').replace(/[^A-Za-z0-9_]/g,'')||'TR';
+}
+
 function buildSpiceRefMap(){
   var map={},counts={vcc:0,source:0};
   var passive=['resistor','capacitor','inductor'];
   for(var i=0;i<S.components.length;i++){
     var c=S.components[i],t=c.type;
     if(t==='gnd')continue;
+    if(t==='transformer'){map[c.id]=transformerRef(c);continue;}
     if(t==='vcc'){counts.vcc++;map[c.id]='V'+counts.vcc;continue;}
     if(t==='source'){
       counts.source++;
@@ -225,6 +235,15 @@ function currentVectorsForPin(comp,pinIdx){
   // Two-terminal devices: the device current is defined from pin 0 to pin 1.
   if(t==='resistor'||t==='capacitor'||t==='inductor'||t==='sw'){
     return res(['@'+ref+'[i]'],pinIdx===0?1:-1);
+  }
+  // Transformer: pins 0/1 are the primary inductor's own two terminals, 2/3
+  // the secondary's — each is a plain two-terminal current, just off a
+  // different one of the two internal L instances (dev overridden so the
+  // display label reads e.g. "I(tr1p.P1)" instead of the shared bare ref).
+  if(t==='transformer'){
+    if(pinIdx===0||pinIdx===1)return{cands:['@l'+ref+'p[i]'],sign:pinIdx===0?1:-1,dev:ref+'p',pin:pinName};
+    if(pinIdx===2||pinIdx===3)return{cands:['@l'+ref+'s[i]'],sign:pinIdx===2?1:-1,dev:ref+'s',pin:pinName};
+    return null;
   }
   if(t==='diode'||t==='led'||t==='zener'){
     return res(['@'+ref+'[id]','@'+ref+'[i]'],pinIdx===0?1:-1);
@@ -409,6 +428,7 @@ function buildSaveVectors(){
     var c=S.components[i],t=c.type,ref=refMap[c.id];
     if(!ref)continue;
     if(t==='resistor'||t==='capacitor'||t==='inductor'||t==='sw'){out.push('@'+ref+'[i]');continue;}
+    if(t==='transformer'){var traf=ref.toLowerCase();out.push('@l'+traf+'p[i]','@l'+traf+'s[i]');continue;}
     if(t==='diode'||t==='led'||t==='zener'){out.push('@'+ref+'[id]');continue;}
     if(t==='npn'||t==='pnp'){out.push('@'+ref+'[ic]','@'+ref+'[ib]','@'+ref+'[ie]');continue;}
     // VDMOS is a three-terminal device here — no [ib]!
@@ -483,6 +503,25 @@ function generateNetlist(){
       var voltage=c.value||def.val||'5V';
       var line=ref+' '+netName+' 0 DC '+voltage;
       lines.push(line);
+      continue;
+    }
+    if(c.type==='transformer'){
+      // Two coupled inductors, not a subcircuit: a primary L, a secondary L
+      // whose value is derived as {Lprimary*u^2} (u = turns ratio, so it
+      // keeps working symbolically if either value references a .param),
+      // and a K statement carrying the coupling factor between them.
+      var traf=transformerRef(c);
+      var tNets=[];
+      for(var ti=0;ti<def.pins.length;ti++){
+        var ttp=xfPin(def.pins[ti].x,def.pins[ti].y,c.rot||0,c.mirror||false);
+        tNets.push(getNetNameWithTempNames(c.x+ttp.x,c.y+ttp.y));
+      }
+      var lp=c.value||def.val||'1m';
+      var uRatio=(c.u!=null&&c.u!=='')?c.u:'1';
+      var kCoup=(c.k!=null&&c.k!=='')?c.k:'1';
+      lines.push('L'+traf+'P '+tNets[0]+' '+tNets[1]+' '+lp);
+      lines.push('L'+traf+'S '+tNets[2]+' '+tNets[3]+' {('+lp+')*('+uRatio+')*('+uRatio+')}');
+      lines.push('K'+traf+' L'+traf+'P L'+traf+'S '+kCoup);
       continue;
     }
     if(c.type==='source'){

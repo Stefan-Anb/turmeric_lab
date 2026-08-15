@@ -152,6 +152,32 @@ const CD={
         T(g,0,-18,v.label||'L','comp-label');T(g,0,20,v.value||'','comp-value');
     }
   },
+  // Ideal transformer, modeled the standard SPICE way as two coupled
+  // inductors: a primary L, a secondary L, and a K (mutual coupling)
+  // statement between them (see generateNetlist()'s 'transformer' branch).
+  // Secondary inductance is derived from primary*u^2 (u = turns ratio) as a
+  // SPICE {…} expression, not computed numerically here, so it keeps working
+  // even when the primary value or u reference a .param.
+  transformer:{
+    lbl:'TR',val:'1m',hitW:170,hitH:160,
+    props:{
+      label:{l:'Reference'},
+      value:{l:'Primary L',def:'1m'},
+      u:{l:'Turns ratio (u)',def:'1'},
+      k:{l:'Coupling (k)',def:'1'}
+    },
+    pins:[{x:-60,y:-40,n:'P1'},{x:-60,y:40,n:'P2'},{x:60,y:-40,n:'S1'},{x:60,y:40,n:'S2'}],
+    draw(g,v){
+      L(g,-60,-40,-20,-40,'comp-pin');L(g,-60,40,-20,40,'comp-pin');
+      L(g,60,-40,20,-40,'comp-pin');L(g,60,40,20,40,'comp-pin');
+      PE(g,'M-20,-40 Q-32,-30 -20,-20 Q-32,-10 -20,0 Q-32,10 -20,20 Q-32,30 -20,40','comp-body');
+      PE(g,'M20,-40 Q32,-30 20,-20 Q32,-10 20,0 Q32,10 20,20 Q32,30 20,40','comp-body');
+      LE(g,-6,-36,-6,36,'comp-body');LE(g,6,-36,6,36,'comp-body');
+      T(g,0,-54,v.label||'TR','comp-label');
+      T(g,0,56,'L='+(v.value||'1m'),'comp-value');
+      T(g,0,70,'u='+(v.u||'1')+'  k='+(v.k||'1'),'comp-value');
+    }
+  },
   diode:{
     lbl:'D',val:'default',hitW:100,hitH:40,
     props:{label:{l:'Reference'},value:{l:'Part'}},
