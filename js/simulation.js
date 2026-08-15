@@ -284,6 +284,7 @@ function runSimulation(){
     simInstance=null;simStarting=null;
     if(btn)btn.disabled=false;
   },90000);
+  var runStart=null;   // set right before runSim(), so engine load time isn't counted
   ensureSim().then(function(sim){
     var netlist=buildFullNetlist();
     simLog('--- Netlist sent to NGSpice ---');
@@ -291,8 +292,10 @@ function runSimulation(){
     simLog('-------------------------------');
     sim.setNetList(netlist);
     simStatus('Simulating…');
+    runStart=performance.now();
     return sim.runSim();
   }).then(function(result){
+    var elapsed=(runStart!=null)?(performance.now()-runStart):null;
     var sim=simInstance;
     try{
       var errs=sim.getError&&sim.getError();
@@ -307,7 +310,8 @@ function runSimulation(){
     // Carry the signal selection over to the new run: keep what still exists,
     // drop what the netlist no longer produces.
     reconcileSelection(result);
-    simStatus('Done: '+result.numPoints+' point(s), '+result.numVariables+' variable(s), '+result.dataType+'.');
+    simStatus('Done: '+result.numPoints+' point(s), '+result.numVariables+' variable(s), '+result.dataType+'.'+
+      (elapsed!=null?' ('+fmtEng(elapsed/1000,3,'s')+')':''));
     plotResult(result);
   }).catch(function(err){
     simStatus('Simulation failed: '+(err&&err.message||err));
@@ -924,22 +928,37 @@ function simFitBoth(){
 // Vector picker: every vector of the last run with a checkbox. It edits the
 // same selection the canvas probes do, so ticking here and probing there can no
 // longer disagree — unticking a probed signal removes its probe as well.
+// Starts collapsed: with "save all signals" on this list can be very long, and
+// most sessions only care about the probed/ticked signals shown above it.
+var simRawPanelCollapsed=true;
+
+function toggleRawPanelCollapse(){
+  simRawPanelCollapsed=!simRawPanelCollapsed;
+  renderRawPanel(simLastResult);
+}
+
 function renderRawPanel(result){
   var panel=document.getElementById('sim-raw-panel');
   if(!panel)return;
   if(!getRawMode()||!result){panel.style.display='none';panel.innerHTML='';return;}
   var map=vectorMapOf(result);
   var owners=probeOwners(map);
-  var html='<div class="sim-label">Result vectors <span class="sim-sub">tick to plot</span></div><div class="sim-raw-grid">';
-  for(var j=1;j<result.data.length;j++){
-    var name=result.data[j].name,key=name.toLowerCase();
-    var own=owners[key];
-    var lbl=own?_probeLabel(own):name;
-    html+='<label class="sim-raw-item'+(own?' probed':'')+'" title="'+esc(name)+'" data-siglabel="'+esc(lbl)+'">'+
-      '<input type="checkbox" data-vec="'+esc(key)+'"'+(simSelection[key]?' checked':'')+'> '+
-      esc(lbl)+'</label>';
+  var count=result.data.length-1;
+  var html='<div class="sim-label sim-raw-toggle" onclick="toggleRawPanelCollapse()">'+
+    (simRawPanelCollapsed?'▸':'▾')+' Result vectors ('+count+') <span class="sim-sub">'+
+    (simRawPanelCollapsed?'click to expand':'tick to plot')+'</span></div>';
+  if(!simRawPanelCollapsed){
+    html+='<div class="sim-raw-grid">';
+    for(var j=1;j<result.data.length;j++){
+      var name=result.data[j].name,key=name.toLowerCase();
+      var own=owners[key];
+      var lbl=own?_probeLabel(own):name;
+      html+='<label class="sim-raw-item'+(own?' probed':'')+'" title="'+esc(name)+'" data-siglabel="'+esc(lbl)+'">'+
+        '<input type="checkbox" data-vec="'+esc(key)+'"'+(simSelection[key]?' checked':'')+'> '+
+        esc(lbl)+'</label>';
+    }
+    html+='</div>';
   }
-  html+='</div>';
   panel.style.display='block';
   panel.innerHTML=html;
   applySignalColors();

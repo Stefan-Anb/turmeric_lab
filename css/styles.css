@@ -162,6 +162,8 @@ body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);displ
 .sim-check{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-mid);cursor:pointer;}
 .sim-check input{accent-color:var(--accent);}
 .sim-raw-panel{border:1px solid var(--border);border-radius:3px;padding:8px 10px;background:var(--bg-card);}
+.sim-raw-toggle{cursor:pointer;user-select:none;}
+.sim-raw-toggle:hover{color:var(--text-hi);}
 .sim-raw-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:4px 12px;margin-top:6px;}
 .sim-raw-item{display:flex;align-items:center;gap:6px;font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--text-hi);cursor:pointer;}
 .sim-raw-item input{accent-color:var(--accent);}

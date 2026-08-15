@@ -382,7 +382,10 @@ function userDefinedModels(){
 
 function pickModel(part,fallback,userModels,notes,ref){
   var p=String(part||'').trim();
-  if(!p)return fallback;
+  // 'default' is the placeholder shown in newly placed components' Part field
+  // (they don't model a specific real device) — treat it the same as blank,
+  // silently, instead of logging a "no .model named 'default'" note.
+  if(!p||p.toLowerCase()==='default')return fallback;
   if(userModels[p.toLowerCase()])return p;
   if(notes&&!notes.seen[p.toLowerCase()]){
     notes.seen[p.toLowerCase()]=true;

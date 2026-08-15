@@ -153,7 +153,7 @@ const CD={
     }
   },
   diode:{
-    lbl:'D',val:'1N4148',hitW:100,hitH:40,
+    lbl:'D',val:'default',hitW:100,hitH:40,
     props:{label:{l:'Reference'},value:{l:'Part'}},
     pins:[{x:40,y:0,n:'A'},{x:-40,y:0,n:'K'}],
     draw(g,v){
@@ -181,7 +181,7 @@ const CD={
   zener:{
     // Z-diode: the breakdown voltage is a per-instance property; the netlist
     // generator emits a matching `.model … D(BV=…)` card for each one.
-    lbl:'D',val:'BZX55C5V1',hitW:100,hitH:40,
+    lbl:'D',val:'default',hitW:100,hitH:40,
     props:{
       label:{l:'Reference'},
       value:{l:'Part'},
@@ -264,7 +264,7 @@ const CD={
     }
   },
   npn:{
-    lbl:'Q',val:'2N2222',hitW:100,hitH:100,
+    lbl:'Q',val:'default',hitW:100,hitH:100,
     props:{label:{l:'Reference'},value:{l:'Part'}},
     pins:[{x:-40,y:0,n:'B'},{x:20,y:-40,n:'C'},{x:20,y:40,n:'E'}],
     draw(g,v){
@@ -274,11 +274,11 @@ const CD={
       L(g,12,-26,20,-40,'comp-pin');L(g,12,26,20,40,'comp-pin');
       AH(g,12,26,20,40);
         T(g,-8,-30,v.label||'Q','comp-label');
-        var valEl = el('text', {x:-12, y:30}); valEl.textContent = v.value||'2N2222'; valEl.setAttribute('class','comp-value'); valEl.setAttribute('text-anchor','end'); g.appendChild(valEl);
+        var valEl = el('text', {x:-12, y:30}); valEl.textContent = v.value||'default'; valEl.setAttribute('class','comp-value'); valEl.setAttribute('text-anchor','end'); g.appendChild(valEl);
     }
   },
   pnp:{
-    lbl:'Q',val:'2N2907',hitW:100,hitH:100,
+    lbl:'Q',val:'default',hitW:100,hitH:100,
     props:{label:{l:'Reference'},value:{l:'Part'}},
     pins:[{x:-40,y:0,n:'B'},{x:20,y:-40,n:'C'},{x:20,y:40,n:'E'}],
     draw(g,v){
@@ -288,11 +288,11 @@ const CD={
       L(g,12,-26,20,-40,'comp-pin');L(g,12,26,20,40,'comp-pin');
       AH(g,20,-40,12,-26);
         T(g,-8,-30,v.label||'Q','comp-label');
-        var valEl = el('text', {x:-12, y:30}); valEl.textContent = v.value||'2N2907'; valEl.setAttribute('class','comp-value'); valEl.setAttribute('text-anchor','end'); g.appendChild(valEl);
+        var valEl = el('text', {x:-12, y:30}); valEl.textContent = v.value||'default'; valEl.setAttribute('class','comp-value'); valEl.setAttribute('text-anchor','end'); g.appendChild(valEl);
     }
   },
   nmos:{
-    lbl:'M',val:'2N7000',hitW:100,hitH:100,
+    lbl:'M',val:'default',hitW:100,hitH:100,
     props:{label:{l:'Reference'},value:{l:'Part'},rdson:{l:'Rds(on) (Ω)',def:'1m'}},
     pins:[{x:-40,y:0,n:'G'},{x:20,y:-40,n:'D'},{x:20,y:40,n:'S'}],
     draw(g,v){
@@ -302,7 +302,7 @@ const CD={
       L(g,12,-12,20,-40,'comp-pin');L(g,12,12,20,40,'comp-pin');
       AH(g,4,0,-4,0);
         T(g,-8,-30,v.label||'M','comp-label');
-        var valEl = el('text', {x:-12, y:38}); valEl.textContent = v.value||'2N7000'; valEl.setAttribute('class','comp-value'); valEl.setAttribute('text-anchor','end'); g.appendChild(valEl);
+        var valEl = el('text', {x:-12, y:38}); valEl.textContent = v.value||'default'; valEl.setAttribute('class','comp-value'); valEl.setAttribute('text-anchor','end'); g.appendChild(valEl);
     }
   },
   source:{
