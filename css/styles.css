@@ -19,9 +19,20 @@ body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);displ
 .tb-btn.active{border-color:var(--accent);color:var(--accent);background:#00c8ff12;}
 .mode-indicator{font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--text-lo);letter-spacing:1px;}
 .mode-indicator span{color:var(--accent);}
-/* Standalone, right-aligned and colour-highlighted so the entry point into
-   the simulation view stands out from the rest of the toolbar. */
-.tb-btn-sim{margin-left:auto;border-color:var(--accent-dim);color:var(--accent);background:#00c8ff14;font-weight:700;}
+/* Run + status + Simulation, grouped and pinned to the toolbar's right edge —
+   the whole entry point into the simulation view lives in one place. */
+.tb-sim-group{margin-left:auto;display:flex;align-items:center;gap:8px;}
+.sim-status-compact{font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--text-mid);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;}
+.tb-btn-run{border-color:var(--accent-dim);}
+.tb-btn-run:disabled{opacity:.5;cursor:default;pointer-events:none;}
+.tb-run-icon{font-size:10px;line-height:1;}
+/* Ready: a green play icon signals the engine is idle and waiting. */
+.tb-btn-run.state-ready .tb-run-icon{color:#3ddc84;}
+/* Running: the whole button turns into a red Stop control. */
+.tb-btn-run.state-running{border-color:#ff5f5f;color:#ff5f5f;}
+.tb-btn-run.state-running .tb-run-icon{color:#ff5f5f;}
+.tb-btn-run.state-running:hover{background:#ff5f5f1e;border-color:#ff5f5f;}
+.tb-btn-sim{border-color:var(--accent-dim);color:var(--accent);background:#00c8ff14;font-weight:700;}
 .tb-btn-sim:hover{border-color:var(--accent);color:var(--accent);background:#00c8ff22;}
 .tb-btn-sim.active{background:var(--accent);border-color:var(--accent);color:#04141c;}
 
@@ -152,7 +163,6 @@ body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);displ
 .sim-chip{display:inline-flex;align-items:center;gap:4px;background:#00c8ff14;border:1px solid var(--accent-dim);border-radius:3px;color:var(--accent);font-family:'Share Tech Mono',monospace;font-size:11px;padding:2px 4px 2px 7px;}
 .sim-chip button{background:none;border:none;color:var(--accent);cursor:pointer;font-size:13px;line-height:1;padding:0 2px;}
 .sim-chip button:hover{color:var(--text-hi);}
-.sim-status{font-size:12px;color:var(--text-mid);font-family:'Share Tech Mono',monospace;}
 .sim-plot{flex:1;width:100%;min-height:60px;overflow:hidden;}
 .sim-log-wrap{border:1px solid var(--border);border-radius:3px;}
 .sim-log-wrap summary{cursor:pointer;padding:6px 10px;font-size:11px;color:var(--text-mid);letter-spacing:1px;text-transform:uppercase;}

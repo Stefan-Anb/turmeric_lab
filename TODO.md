@@ -11,7 +11,5 @@
 
 
 * Step Parameter, Multisimulation, Graphenschar im Plot, Auswahl einzelner Graphen, Berechnung von Kennlinien aus Multisimulation
-* besser ersichtlicher Ablauf der Simulation -> workerthread + live update der graphen wenn möglich
 * alle Platzhalter entfernen oder setzen -> kann verwirren
-* Trafo modell
 * Farben in Plots fixen, wenn Signale entfernt werden nicht die anderen Farben ändern

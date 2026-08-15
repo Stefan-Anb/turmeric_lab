@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════
-// NGSPICE SIMULATION (WASM) + INTERACTIVE PLOT
+// NGSPICE SIMULATION (WASM, off the main thread) + INTERACTIVE PLOT
 //
 // Uses eecircuit-engine (ngspice compiled to WebAssembly) loaded lazily from a
 // CDN as an ES module, and uPlot for an interactive (zoom / pan / cursor /
@@ -10,13 +10,17 @@
 // "All …" buttons — unless a previous session (or the loaded SVG) already had
 // a selection, which is carried over.
 //
+// The engine itself runs inside js/sim-worker.js (a dedicated Worker), not on
+// this thread — see runSimulation() and simWorkerHandleMessage() below. That
+// keeps the UI responsive during a long run and, unlike the old in-thread
+// call, lets a hung engine actually be killed (worker.terminate()) instead of
+// just abandoned. Netlist assembly still happens here: it needs S.components /
+// S.probes / the rest of the schematic state, which the worker doesn't have.
+//
 // Requires a network connection on first run to fetch the WASM engine. The
 // engine and uPlot can later be vendored locally for offline use.
 // ═══════════════════════════════════════════════════
 
-var EE_ENGINE_URL='https://esm.sh/eecircuit-engine@1.7.0';
-var simInstance=null;     // started Simulation instance (cached)
-var simStarting=null;     // in-flight start() promise (de-dupes concurrent starts)
 var simPlot=null;         // current uPlot instance
 var simLastResult=null;   // last result, for re-plot when probe selection changes
 // The plotted signals are one single selection: a map of result-vector names
@@ -232,27 +236,167 @@ function simLog(msg,isErr){
   if(elx){elx.textContent+=(isErr?'[ERROR] ':'')+msg+'\n';elx.scrollTop=elx.scrollHeight;}
   if(isErr)console.warn('[sim]',msg);
 }
-function simStatus(msg){var elx=document.getElementById('sim-status');if(elx)elx.textContent=msg;}
+// The status now lives in the compact toolbar strip, so long messages (errors,
+// the watchdog notice) get truncated by CSS — the full text stays reachable
+// as a native tooltip.
+function simStatus(msg){var elx=document.getElementById('sim-status');if(elx){elx.textContent=msg;elx.title=msg;}}
 
-// Lazily load + start the ngspice WASM engine. Returns the Simulation instance.
-function ensureSim(){
-  if(simInstance)return Promise.resolve(simInstance);
-  if(simStarting)return simStarting;
+// ═══ SIMULATION WORKER (with a same-thread fallback) ═══
+// The engine (load + setNetList + runSim) normally lives entirely in
+// js/sim-worker.js. This is the main-thread side: one lazily-created worker,
+// talked to purely via postMessage. simRunToken tags each request so a reply
+// for an old, superseded run (or one that arrives after a watchdog restart)
+// is ignored.
+//
+// Module workers can't be loaded from a `file://` page in most browsers (no
+// CORS-safe way to fetch the worker script) — that failure is often silent
+// (no onerror, just no reply, ever), which used to leave the UI stuck showing
+// "Simulating…" forever with the status bar still saying "Idle.". So: if the
+// worker doesn't even answer a "preload" ping within a few seconds, or if it
+// errors out at any point, simWorkerFailed latches true and every run from
+// then on executes right here on the main thread instead (mtRunOnMainThread) —
+// functionally identical, just without the responsiveness/kill-a-hung-run
+// benefits a working worker gives.
+var simWorker=null;
+var simWorkerFailed=false;
+var simWorkerAlive=false;   // true once any message has ever been received
+var simRunToken=0;
+var simRunPending=null;   // {token, netlist} while a run's result hasn't arrived yet
+var simTicker=null;       // interval id for the "Simulating… (n s)" live status
+var simWatchdog=null;
+
+function getSimWorker(){
+  if(simWorkerFailed)return null;
+  if(simWorker)return simWorker;
+  try{
+    simWorker=new Worker('js/sim-worker.js',{type:'module'});
+  }catch(err){
+    simLog('Could not create the simulation worker ('+String(err&&err.message||err)+'); falling back to running NGSpice on this thread.',true);
+    simWorkerFailed=true;
+    return null;
+  }
+  simWorker.onmessage=function(e){simWorkerHandleMessage(e.data||{});};
+  simWorker.onerror=function(err){
+    simLog('Simulation worker failed ('+(err&&(err.message||err.filename+':'+err.lineno)||err)+') — falling back to running NGSpice on this thread. This usually means the page was opened as a local file instead of served over http(s).',true);
+    failWorkerAndFallback();
+  };
+  return simWorker;
+}
+
+// Give up on the worker (this run and every future one) and retry whatever
+// was in flight, if anything, directly on this thread instead.
+function failWorkerAndFallback(){
+  if(simWorkerFailed)return;
+  simWorkerFailed=true;
+  if(simWorker){try{simWorker.terminate();}catch(e){}simWorker=null;}
+  if(simRunPending)mtRunOnMainThread(simRunPending.token,simRunPending.netlist);
+  else mtEnsureSim().catch(function(err){simLog('WASM preload failed: '+String(err&&err.message||err),true);});
+}
+
+// Kick the engine off (worker if it works, main thread otherwise) right away
+// instead of waiting for the first Run — see initSimSettings() below.
+function preloadSimEngine(){
+  var w=getSimWorker();
+  if(!w){mtEnsureSim().catch(function(err){simLog('WASM preload failed: '+String(err&&err.message||err),true);});return;}
+  w.postMessage({type:'preload'});
+  setTimeout(function(){
+    if(simWorkerAlive||simWorkerFailed)return;
+    simLog('No response from the simulation worker after 3s — assuming it cannot run here (page opened via file:// ?). Falling back to running NGSpice on this thread.',true);
+    failWorkerAndFallback();
+  },3000);
+}
+
+// Start (or restart) the elapsed-time ticker that stands in for real progress
+// — the batch engine has no per-timestep hook to report actual progress from,
+// so "as live as possible" here means at least showing that it is still going
+// and for how long, instead of a frozen "Simulating…".
+function startSimTicker(){
+  stopSimTicker();
+  var t0=(typeof performance!=='undefined'?performance.now():Date.now());
+  simTicker=setInterval(function(){
+    var now=(typeof performance!=='undefined'?performance.now():Date.now());
+    simStatus('Simulating… ('+fmtEng((now-t0)/1000,2,'s')+')');
+  },200);
+}
+function stopSimTicker(){
+  if(simTicker){clearInterval(simTicker);simTicker=null;}
+}
+
+function simWorkerHandleMessage(msg){
+  simWorkerAlive=true;
+  if(msg.type==='preload-error'){
+    simLog('WASM preload failed: '+msg.message,true);
+    return;
+  }
+  // Everything else belongs to a specific run — a token mismatch means a
+  // newer run (or a watchdog-triggered worker restart) has already taken over.
+  if(msg.token!==undefined&&msg.token!==simRunToken)return;
+  if(msg.type==='status'){
+    simStatus(msg.message);
+    if(msg.message==='Simulating…')startSimTicker();
+    return;
+  }
+  if(msg.type==='result'){
+    stopSimTicker();
+    clearTimeout(simWatchdog);
+    finishRun(msg.result,msg.elapsed,msg.errs,msg.info);
+    return;
+  }
+  if(msg.type==='error'){
+    stopSimTicker();
+    clearTimeout(simWatchdog);
+    simStatus('Simulation failed: '+msg.message);
+    simLog(msg.stack||msg.message,true);
+    endRunUI();
+    return;
+  }
+}
+
+// ═══ MAIN-THREAD FALLBACK ═══
+// Only used once the worker is known not to work in this context. Same
+// load-once-cache-the-instance shape as js/sim-worker.js's own ensureSim() —
+// duplicated rather than shared, since a worker and the main thread can't
+// share a module without extra build tooling, and this is short enough that
+// the duplication is cheaper than the alternative.
+var mtSimInstance=null;
+var mtSimStarting=null;
+function mtEnsureSim(){
+  if(mtSimInstance)return Promise.resolve(mtSimInstance);
+  if(mtSimStarting)return mtSimStarting;
   simStatus('Loading NGSpice (WASM)…');
-  simStarting=import(EE_ENGINE_URL).then(function(mod){
+  mtSimStarting=import('https://esm.sh/eecircuit-engine@1.7.0').then(function(mod){
     var Sim=mod.Simulation||(mod.default&&mod.default.Simulation);
     if(!Sim)throw new Error('eecircuit-engine: Simulation export not found');
     var sim=new Sim();
     return Promise.resolve(sim.start()).then(function(){
-      simInstance=sim;
+      mtSimInstance=sim;
       simStatus('NGSpice ready.');
       return sim;
     });
+  }).catch(function(err){mtSimStarting=null;throw err;});
+  return mtSimStarting;
+}
+function mtRunOnMainThread(token,netlist){
+  startSimTicker();
+  mtEnsureSim().then(function(sim){
+    sim.setNetList(netlist);
+    simStatus('Simulating…');
+    var t0=(typeof performance!=='undefined'?performance.now():Date.now());
+    return Promise.resolve(sim.runSim()).then(function(result){
+      var elapsed=(typeof performance!=='undefined'?performance.now():Date.now())-t0;
+      var errs=null,info=null;
+      try{errs=sim.getError&&sim.getError();info=sim.getInfo&&sim.getInfo();}catch(e){}
+      if(token!==simRunToken)return;
+      stopSimTicker();clearTimeout(simWatchdog);
+      finishRun(result,elapsed,errs||[],info||'');
+    });
   }).catch(function(err){
-    simStarting=null;
-    throw err;
+    if(token!==simRunToken)return;
+    stopSimTicker();clearTimeout(simWatchdog);
+    simStatus('Simulation failed: '+(err&&err.message||err));
+    simLog(String(err&&err.stack||err),true);
+    endRunUI();
   });
-  return simStarting;
 }
 
 // ═══ ANALYSIS SETTINGS UI ═══
@@ -384,65 +528,117 @@ function needsCurrents(){
   return getRawMode();   // picker open: keep everything pickable
 }
 
-var simRunToken=0;      // identifies the newest run, so a stale watchdog stays quiet
-
-function runSimulation(){
+// Run/Stop is one button that swaps state, icon and label instead of two
+// separate controls: a green ▶ while idle, a red ■ Stop while a simulation is
+// in flight. Stop invalidates the current run's token (see simRunToken) and,
+// when running in a worker, actually terminates it — the worker is what makes
+// a genuine mid-run cancel possible at all (see failWorkerAndFallback's
+// comment: the main-thread fallback has no equivalent, since it can't run any
+// JS, including a click handler, while its own blocking WASM call is going).
+function setRunButtonState(state){
   var btn=document.getElementById('sim-run-btn');
-  if(btn)btn.disabled=true;
+  if(!btn)return;
+  var icon=document.getElementById('sim-run-icon'),label=document.getElementById('sim-run-label');
+  if(state==='running'){
+    btn.classList.remove('state-ready');btn.classList.add('state-running');
+    if(icon)icon.textContent='■';
+    if(label)label.textContent='STOP';
+    btn.title='Stop the running simulation';
+    btn.onclick=stopSimulation;
+  }else{
+    btn.classList.remove('state-running');btn.classList.add('state-ready');
+    if(icon)icon.textContent='▶';
+    if(label)label.textContent='RUN';
+    btn.title='Run the simulation';
+    btn.onclick=runSimulation;
+  }
+}
+
+// User pressed Stop: bump the token so any reply for the run in flight (worker
+// or main-thread fallback) is ignored when it eventually arrives, and — if a
+// worker is doing the work — kill it outright instead of waiting it out.
+function stopSimulation(){
+  stopSimTicker();
+  clearTimeout(simWatchdog);
+  simRunToken++;
+  if(simWorker){simWorker.terminate();simWorker=null;}
+  simStatus('Simulation stopped.');
+  simLog('Simulation stopped by user.');
+  showSimPlotPlaceholder('Simulation stopped.');
+  endRunUI();
+}
+
+// The plot pane pops up (if it wasn't already) the instant Run is pressed —
+// with a "Simulating…" placeholder, not stale data from a previous run — and
+// gets filled the instant the worker's result message arrives.
+function runSimulation(){
+  setRunButtonState('running');
   var logEl=document.getElementById('sim-log');if(logEl)logEl.textContent='';
-  // A fatal ngspice error (e.g. an unknown function in a B-source) aborts the
-  // WASM instance without ever settling runSim()'s promise, which would leave
-  // the UI stuck on "Simulating…" forever. The watchdog reports that and drops
-  // the dead engine so the next run starts a fresh one.
+  if(!simViewActive)setSimView(true);
+  showSimPlotPlaceholder('Simulating…');
   var token=++simRunToken;
-  var watchdog=setTimeout(function(){
-    if(token!==simRunToken)return;
-    simStatus('No response from NGSpice after 90 s — the engine probably aborted (see the log / browser console). A fresh engine will be loaded on the next run.');
-    simLog('watchdog: no result after 90 s, dropping the engine instance',true);
-    simInstance=null;simStarting=null;
-    if(btn)btn.disabled=false;
+  var netlist=buildFullNetlist();
+  simRunPending={token:token,netlist:netlist};
+  // A fatal ngspice error (e.g. an unknown function in a B-source) can abort
+  // the engine without ever posting a reply, which would leave the UI stuck
+  // on "Simulating…" forever. The watchdog reports that and — when the engine
+  // is running in its worker — actually kills it (terminate()), instead of
+  // just abandoning a main-thread call that has no equivalent "stop" button.
+  // A fresh worker/engine is created on the next run either way.
+  simWatchdog=setTimeout(function(){
+    stopSimTicker();
+    simStatus('No response from NGSpice after 90 s — the engine probably hung (see the log / browser console). A fresh engine will be loaded on the next run.');
+    simLog('watchdog: no result after 90 s, dropping the engine',true);
+    if(simWorker){simWorker.terminate();simWorker=null;}
+    mtSimInstance=null;mtSimStarting=null;
+    endRunUI();
   },90000);
-  var runStart=null;   // set right before runSim(), so engine load time isn't counted
-  ensureSim().then(function(sim){
-    var netlist=buildFullNetlist();
-    simLog('--- Netlist sent to NGSpice ---');
-    simLog(netlist);
-    simLog('-------------------------------');
-    sim.setNetList(netlist);
-    simStatus('Simulating…');
-    runStart=performance.now();
-    return sim.runSim();
-  }).then(function(result){
-    var elapsed=(runStart!=null)?(performance.now()-runStart):null;
-    var sim=simInstance;
-    var info=null;
-    try{
-      var errs=sim.getError&&sim.getError();
-      if(errs&&errs.length)errs.forEach(function(e){simLog(e,true);});
-      info=sim.getInfo&&sim.getInfo();if(info)simLog(info);
-    }catch(e){}
-    simLastInfoText=info||'';
-    parseMeasurements();
-    if(!result||!result.data||!result.data.length){
-      simStatus('No data returned. Check the directives and the log below.');
-      return;
-    }
-    simLastResult=result;
-    simCursors=[];   // a fresh run gets a fresh x grid — old cursor positions no longer apply
-    // Carry the signal selection over to the new run: keep what still exists,
-    // drop what the netlist no longer produces.
-    reconcileSelection(result);
-    simStatus('Done: '+result.numPoints+' point(s), '+result.numVariables+' variable(s), '+result.dataType+'.'+
-      (elapsed!=null?' ('+fmtEng(elapsed/1000,3,'s')+')':''));
-    plotResult(result);
-  }).catch(function(err){
-    simStatus('Simulation failed: '+(err&&err.message||err));
-    simLog(String(err&&err.stack||err),true);
-  }).then(function(){
-    clearTimeout(watchdog);
-    if(btn)btn.disabled=false;
-    renderMeasureList();
-  });
+  simLog('--- Netlist sent to NGSpice ---');
+  simLog(netlist);
+  simLog('-------------------------------');
+  var w=getSimWorker();
+  if(w)w.postMessage({type:'run',token:token,netlist:netlist});
+  else mtRunOnMainThread(token,netlist);
+}
+
+// Result arrived from the worker: log, parse .measure results, plot.
+function finishRun(result,elapsed,errs,info){
+  if(errs&&errs.length)errs.forEach(function(e){simLog(e,true);});
+  if(info)simLog(info);
+  simLastInfoText=info||'';
+  parseMeasurements();
+  if(!result||!result.data||!result.data.length){
+    simStatus('No data returned. Check the directives and the log below.');
+    showSimPlotPlaceholder('No data returned. Check the directives and the log below.');
+    endRunUI();
+    return;
+  }
+  simLastResult=result;
+  simCursors=[];   // a fresh run gets a fresh x grid — old cursor positions no longer apply
+  // Carry the signal selection over to the new run: keep what still exists,
+  // drop what the netlist no longer produces.
+  reconcileSelection(result);
+  simStatus('Done: '+result.numPoints+' point(s), '+result.numVariables+' variable(s), '+result.dataType+'.'+
+    (elapsed!=null?' ('+fmtEng(elapsed/1000,3,'s')+')':''));
+  plotResult(result);
+  endRunUI();
+}
+
+// Flip the button back to "Run" and refresh the .measure list — the tail end
+// of every run, success, failure or user-requested stop alike.
+function endRunUI(){
+  setRunButtonState('ready');
+  simRunPending=null;
+  renderMeasureList();
+}
+
+// A lightweight placeholder for the plot area — used the instant Run is
+// pressed (before any data exists) and if a run comes back empty.
+function showSimPlotPlaceholder(msg){
+  var container=document.getElementById('sim-plot');
+  if(!container)return;
+  if(simPlot){simPlot.destroy();simPlot=null;}
+  container.innerHTML='<div class="sim-plot-empty">'+esc(msg)+'</div>';
 }
 
 // Regex-parse ngspice's own "name = value" (or "name = failed") result lines
@@ -2124,6 +2320,11 @@ function applySimConfigCollapse(){
     renderProbeList();
     renderMeasureList();
     applySimConfigCollapse();
+    setRunButtonState('ready');
+    // Preload the WASM engine (worker if it works here, main thread otherwise)
+    // right away instead of waiting for the first Run, so that click doesn't
+    // also have to pay for the (network) fetch + start.
+    preloadSimEngine();
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',attach);else attach();
 })();

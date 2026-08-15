@@ -35,7 +35,11 @@
     <svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 4V1h3M8 1h3v3M11 8v3H8M4 11H1V8" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>ZOOM FIT
   </button>
   <div class="mode-indicator">MODE: <span id="mode-label">SELECT</span></div>
-  <button class="tb-btn tb-btn-sim" id="btn-sim" onclick="simulateButtonClick()">SIMULATION</button>
+  <div class="tb-sim-group">
+    <span id="sim-status" class="sim-status-compact" title="Idle.">Idle.</span>
+    <button id="sim-run-btn" class="tb-btn tb-btn-run state-ready" title="Run the simulation"><span id="sim-run-icon" class="tb-run-icon">▶</span><span id="sim-run-label">RUN</span></button>
+    <button class="tb-btn tb-btn-sim" id="btn-sim" onclick="simulateButtonClick()">SIMULATION</button>
+  </div>
 </div>
 
 <div id="main">
@@ -221,10 +225,6 @@
         <label class="sim-label">Measurements <span class="sim-sub">(.measure — delays, thresholds, range statistics)</span></label>
         <div id="sim-measure-list" class="sim-measure-list"></div>
         <button id="sim-measure-add-btn" class="tb-btn" style="margin-top:6px;font-size:10px;padding:3px 8px;align-self:flex-start" onclick="openMeasureModal(-1)">+ Add measurement</button>
-      </div>
-      <div class="sim-row" style="flex-direction:row;align-items:center;gap:10px;flex-wrap:wrap">
-        <button id="sim-run-btn" class="props-apply" style="width:auto;margin:0;padding:8px 18px" onclick="runSimulation()">Run</button>
-        <span id="sim-status" class="sim-status">Idle.</span>
       </div>
       <div class="sim-row">
         <label class="sim-check"><input type="checkbox" id="sim-raw-mode" checked onchange="onRawModeChange()"> Save &amp; list all signals <span class="sim-sub">(saves every device terminal current, so it can be picked afterwards)</span></label>
