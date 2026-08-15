@@ -211,6 +211,42 @@ body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);displ
 .sim-formula.has-error input.sim-f-expr{border-color:var(--accent2);}
 .sim-f-error{flex-basis:100%;font-size:10px;color:var(--accent2);font-family:'Share Tech Mono',monospace;}
 
+/* ═══ SIMULATION SETTINGS: measurements (.measure) ═══ */
+.sim-measure-list{display:flex;flex-direction:column;gap:5px;}
+.sim-measure-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:11px;}
+.sim-measure-row input[type=checkbox]{accent-color:var(--accent);flex:none;}
+.sim-measure-name{font-family:'Share Tech Mono',monospace;color:var(--text-hi);flex:none;}
+.sim-measure-summary{color:var(--text-mid);flex:1;min-width:0;}
+.sim-measure-result{font-family:'Share Tech Mono',monospace;color:var(--text-mid);flex:none;}
+.sim-measure-result.ok{color:var(--accent);}
+.sim-measure-result.failed{color:var(--accent2);}
+.sim-measure-row button{background:none;border:none;color:var(--text-mid);cursor:pointer;font-size:13px;line-height:1;padding:0 2px;flex:none;}
+.sim-measure-row button:hover{color:var(--accent2);}
+#sim-measure-add-btn:disabled{opacity:.4;cursor:not-allowed;}
+
+/* Deliberately not `.modal` — no fixed inset:0 backdrop, so the plot behind it
+   stays clickable (cursors can still be placed while this is open). Docked to
+   a default spot clear of the plot pane; draggable by its header if it ends
+   up in the way (e.g. a resized plot, a narrow window). */
+.measure-overlay{position:fixed;top:70px;right:300px;z-index:1000;}
+.measure-overlay .modal-header{cursor:move;user-select:none;}
+.measure-modal-body{padding:12px 16px;max-height:70vh;overflow-y:auto;display:flex;flex-direction:column;}
+.measure-field-row{position:relative;}
+.measure-field-row input,.measure-field-row select{padding-right:26px;}
+.sim-cursor-grab{position:absolute;right:2px;bottom:3px;background:none;border:none;color:var(--accent);cursor:pointer;font-size:11px;line-height:1;padding:2px 4px;}
+.sim-cursor-grab:hover{color:var(--text-hi);}
+.measure-modal-footer{display:flex;gap:8px;margin-top:12px;}
+
+/* Signal fields: a filtered list shown on focus, not a native <select>/
+   <datalist> popup that only opened on a second click. */
+.measure-sig-field{z-index:0;}
+.measure-sig-field:focus-within{z-index:5;}
+.measure-sig-dropdown{position:absolute;top:100%;left:0;right:0;margin-top:2px;background:var(--bg-card);border:1px solid var(--border-hi);border-radius:3px;max-height:160px;overflow-y:auto;box-shadow:0 6px 16px #0008;display:none;}
+.measure-sig-dropdown.open{display:block;}
+.measure-sig-item{padding:4px 8px;font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--text-hi);cursor:pointer;}
+.measure-sig-item:hover{background:var(--accent-dim);}
+.measure-sig-empty{padding:4px 8px;font-size:11px;color:var(--text-lo);font-style:italic;}
+
 /* ═══ PLOT: fit buttons and value tooltip ═══ */
 .sim-fit-btn{background:var(--bg-card);border:1px solid var(--border);border-radius:3px;color:var(--text-mid);font-family:'Rajdhani',sans-serif;font-size:10px;font-weight:700;letter-spacing:1px;padding:3px 8px;cursor:pointer;transition:all .15s;flex:none;}
 .sim-fit-btn:hover{border-color:var(--accent);color:var(--accent);background:#00c8ff12;}

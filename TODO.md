@@ -10,7 +10,8 @@
   nutzen. Der Schalter gehört aus dieser Liste entfernt.
 
 
-* Measurement-Statements konfigurierbar und UI dafür
 * Step Parameter, Multisimulation, Graphenschar im Plot, Auswahl einzelner Graphen, Berechnung von Kennlinien aus Multisimulation
-* Schneller zugänglicher Run Button, besser ersichtlicher Ablauf der Simulation -> workerthread + live update der graphen wenn möglich
+* besser ersichtlicher Ablauf der Simulation -> workerthread + live update der graphen wenn möglich
 * alle Platzhalter entfernen oder setzen -> kann verwirren
+* Trafo modell
+* Farben in Plots fixen, wenn Signale entfernt werden nicht die anderen Farben ändern

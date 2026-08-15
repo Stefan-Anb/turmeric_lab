@@ -49,6 +49,15 @@ var simAnalysis={
 };
 var simFormulas=[];        // [{name,expr,on}]
 
+// Measurement statements (.measure). See MEASURE_DEFAULTS below for the shape
+// of one entry. `result` is transient (filled in by parseMeasurements() after
+// each run) and never persisted.
+var simMeasurements=[];
+var simLastInfoText='';    // last sim.getInfo() text — .measure results are parsed out of this
+var simMeasureDraft=null;  // {index, data} while the overlay is open; null otherwise
+var simMeasureActiveSigPath=null; // last-focused signal field path in the overlay, e.g. 'stat.sig'
+var MEASURE_NEXT_ID=1;
+
 function loadSimSettings(){
   try{
     var raw=localStorage.getItem('sim_settings');
@@ -61,6 +70,13 @@ function loadSimSettings(){
       if(st.analysis.ac)for(var k3 in st.analysis.ac)simAnalysis.ac[k3]=st.analysis.ac[k3];
     }
     if(Array.isArray(st.formulas))simFormulas=st.formulas;
+    if(Array.isArray(st.measurements)){
+      simMeasurements=st.measurements;
+      simMeasurements.forEach(function(m){
+        var n=parseInt(String(m.id||'').replace(/^m/,''),10);
+        if(!isNaN(n)&&n>=MEASURE_NEXT_ID)MEASURE_NEXT_ID=n+1;
+      });
+    }
     if(typeof st.directives==='string'){
       var d=document.getElementById('sim-directives');
       if(d)d.value=st.directives;
@@ -75,7 +91,11 @@ function saveSimSettings(){
   try{
     var d=document.getElementById('sim-directives');
     localStorage.setItem('sim_settings',JSON.stringify({
-      analysis:simAnalysis,formulas:simFormulas,directives:d?d.value:'',saveAll:getRawMode()
+      analysis:simAnalysis,formulas:simFormulas,
+      measurements:simMeasurements.map(function(m){
+        var c={};for(var k in m)if(k!=='result')c[k]=m[k];return c;
+      }),
+      directives:d?d.value:'',saveAll:getRawMode()
     }));
   }catch(e){}
 }
@@ -124,6 +144,71 @@ function buildOptionsDirective(){
   var trtol=a.tran.trtol;
   if(!trtol||!a.tran.tstop)return '';
   return '.options trtol='+trtol;
+}
+
+// ═══ MEASUREMENT (.measure) DIRECTIVE BUILDER ═══
+// NGSpice syntax (ngspice manual, ch. "Measurements after AC, DC and Transient
+// analysis"):
+//   .measure {tran|dc|ac} name FIND expr AT=t
+//   .measure {tran|dc|ac} name FIND expr WHEN v(sig)=val <TD=t><RISE=n|FALL=n|CROSS=n>
+//   .measure {tran|dc|ac} name {MAX|MIN|PP|AVG|RMS|INTEG} expr FROM=t1 TO=t2
+//   .measure {tran|dc|ac} name TRIG trig VAL=v <TD=t><RISE=n|FALL=n|CROSS=n>
+//                              TARG targ VAL=v <TD=t><RISE=n|FALL=n|CROSS=n>
+// Only meaningful once the analysis type (and its sweep variable, time or
+// frequency) is known — not for .op (no sweep) or "manual" mode (the app
+// doesn't know what analysis card the user wrote by hand).
+function measureAnalysisKeyword(){
+  var t=simAnalysis.type;
+  return (t==='tran'||t==='dc'||t==='ac')?t:null;
+}
+
+function buildMeasureLine(m){
+  var kw=measureAnalysisKeyword();
+  if(!kw||!m||!m.name)return '';
+  var name=m.name;
+  if(m.kind==='find_at'){
+    var fa=m.findAt||{};
+    if(!fa.expr||!fa.at)return '';
+    return '.measure '+kw+' '+name+' FIND '+fa.expr+' AT='+fa.at;
+  }
+  if(m.kind==='find_when'){
+    var fw=m.findWhen||{};
+    if(!fw.expr||!fw.whenSig||fw.whenVal==='')return '';
+    var s='.measure '+kw+' '+name+' FIND '+fw.expr+' WHEN '+fw.whenSig+'='+fw.whenVal;
+    if(fw.td)s+=' TD='+fw.td;
+    if(fw.count)s+=' '+(fw.edge||'CROSS')+'='+fw.count;
+    return s;
+  }
+  if(m.kind==='trig_targ'){
+    var tt=m.trigTarg||{};
+    if(!tt.trigSig||tt.trigVal===''||!tt.targSig||tt.targVal==='')return '';
+    var t1='TRIG '+tt.trigSig+' VAL='+tt.trigVal;
+    if(tt.trigTd)t1+=' TD='+tt.trigTd;
+    t1+=' '+(tt.trigEdge||'RISE')+'='+(tt.trigCount||'1');
+    var t2='TARG '+tt.targSig+' VAL='+tt.targVal;
+    if(tt.targTd)t2+=' TD='+tt.targTd;
+    t2+=' '+(tt.targEdge||'RISE')+'='+(tt.targCount||'1');
+    return '.measure '+kw+' '+name+' '+t1+' '+t2;
+  }
+  // default: 'stat' — a range statistic (MAX/MIN/PP/AVG/RMS/INTEG)
+  var st=m.stat||{};
+  if(!st.sig)return '';
+  var line='.measure '+kw+' '+name+' '+(st.func||'PP')+' '+st.sig;
+  if(st.from)line+=' FROM='+st.from;
+  if(st.to)line+=' TO='+st.to;
+  return line;
+}
+
+function buildMeasureDirectives(){
+  if(!measureAnalysisKeyword())return '';
+  var lines=[];
+  for(var i=0;i<simMeasurements.length;i++){
+    var m=simMeasurements[i];
+    if(m.enabled===false)continue;
+    var l=buildMeasureLine(m);
+    if(l)lines.push(l);
+  }
+  return lines.join('\n');
 }
 
 // Voltage/current sources available as a .dc sweep source, by SPICE name.
@@ -258,6 +343,7 @@ function onAnalysisTypeChange(sel){
   simAnalysis.type=sel.value;
   saveSimSettings();
   renderAnalysisPanel();
+  if(typeof renderMeasureList==='function')renderMeasureList();
 }
 
 // Assemble the full deck: generated devices + analysis card + user directives + .end.
@@ -275,6 +361,8 @@ function buildFullNetlist(){
   var options=buildOptionsDirective();
   if(options)lines.push(options);
   if(directives)lines.push(directives);
+  var measures=buildMeasureDirectives();
+  if(measures)lines.push(measures);
   lines.push('.end');
   return lines.join('\n');
 }
@@ -285,6 +373,11 @@ function needsCurrents(){
   for(var i=0;i<probes.length;i++)if(probes[i].kind==='I')return true;
   for(var j=0;j<simFormulas.length;j++){
     if(simFormulas[j].on!==false&&/[i]\s*\(|@/i.test(simFormulas[j].expr||''))return true;
+  }
+  for(var mi=0;mi<simMeasurements.length;mi++){
+    if(simMeasurements[mi].enabled===false)continue;
+    var mline=buildMeasureLine(simMeasurements[mi]);
+    if(/[i]\s*\(|@/i.test(mline))return true;
   }
   // a current vector that is selected from a previous run has to stay available
   for(var k in simSelection)if(isCurrentVectorName(k))return true;
@@ -322,11 +415,14 @@ function runSimulation(){
   }).then(function(result){
     var elapsed=(runStart!=null)?(performance.now()-runStart):null;
     var sim=simInstance;
+    var info=null;
     try{
       var errs=sim.getError&&sim.getError();
       if(errs&&errs.length)errs.forEach(function(e){simLog(e,true);});
-      var info=sim.getInfo&&sim.getInfo();if(info)simLog(info);
+      info=sim.getInfo&&sim.getInfo();if(info)simLog(info);
     }catch(e){}
+    simLastInfoText=info||'';
+    parseMeasurements();
     if(!result||!result.data||!result.data.length){
       simStatus('No data returned. Check the directives and the log below.');
       return;
@@ -345,7 +441,24 @@ function runSimulation(){
   }).then(function(){
     clearTimeout(watchdog);
     if(btn)btn.disabled=false;
+    renderMeasureList();
   });
+}
+
+// Regex-parse ngspice's own "name = value" (or "name = failed") result lines
+// out of the last run's info text — .measure has no dedicated result API in
+// eecircuit-engine, this is the same text the log panel already shows.
+function escapeRegExp(s){return String(s).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}
+function parseMeasurements(){
+  for(var i=0;i<simMeasurements.length;i++){
+    var m=simMeasurements[i];
+    if(m.enabled===false||!m.name){m.result=null;continue;}
+    var re=new RegExp('^\\s*'+escapeRegExp(m.name)+'\\s*=\\s*(\\S+)','im');
+    var match=simLastInfoText.match(re);
+    if(!match){m.result={ok:false,raw:'no result'};continue;}
+    var raw=match[1];
+    m.result={ok:raw.toLowerCase()!=='failed',raw:raw,value:parseFloat(raw)};
+  }
 }
 
 // ---- result -> numeric helpers (real numbers or {real,img}) ----
@@ -668,6 +781,524 @@ function removeFormula(i){
   if(simLastResult)plotResult(simLastResult);
 }
 
+// ═══ MEASUREMENTS (.measure) — sidebar list + config overlay ═══
+
+// Every vector the last run produced (voltages and currents alike) — the
+// "live list" signal fields in the measurement overlay pick from this.
+function availableSignalNames(){
+  if(!simLastResult||!simLastResult.data)return [];
+  var out=[];
+  for(var i=1;i<simLastResult.data.length;i++)out.push(simLastResult.data[i].name);
+  return out;
+}
+
+function measureSummary(m){
+  if(m.kind==='find_at'){
+    var fa=m.findAt||{};
+    return 'FIND '+(fa.expr||'?')+' AT='+(fa.at||'?');
+  }
+  if(m.kind==='find_when'){
+    var fw=m.findWhen||{};
+    return 'FIND '+(fw.expr||'?')+' WHEN '+(fw.whenSig||'?')+'='+(fw.whenVal||'?');
+  }
+  if(m.kind==='trig_targ'){
+    var tt=m.trigTarg||{};
+    return 'delay '+(tt.trigSig||'?')+' → '+(tt.targSig||'?');
+  }
+  var st=m.stat||{};
+  var range=(st.from||st.to)?(' ['+(st.from||'start')+' → '+(st.to||'end')+']'):'';
+  return (st.func||'PP')+' of '+(st.sig||'?')+range;
+}
+
+function renderMeasureList(){
+  var host=document.getElementById('sim-measure-list');
+  if(!host)return;
+  var addBtn=document.getElementById('sim-measure-add-btn');
+  var kwDisabled=!measureAnalysisKeyword();
+  if(addBtn){
+    addBtn.disabled=kwDisabled;
+    addBtn.title=kwDisabled?'Measurements need a Transient/DC/AC analysis card (not available in Operating-point or Manual mode).':'';
+  }
+  if(!simMeasurements.length){
+    host.innerHTML='<span class="sim-probe-empty">none — add one to read off a delay, threshold or range statistic after each run</span>';
+    return;
+  }
+  var html='';
+  for(var i=0;i<simMeasurements.length;i++){
+    var m=simMeasurements[i];
+    var resHtml;
+    if(kwDisabled)resHtml='<span class="sim-measure-result">needs tran/dc/ac</span>';
+    else if(!m.result)resHtml='<span class="sim-measure-result">—</span>';
+    else if(m.result.ok)resHtml='<span class="sim-measure-result ok">'+esc(fmtEng(m.result.value,5))+'</span>';
+    else resHtml='<span class="sim-measure-result failed">'+esc(m.result.raw||'failed')+'</span>';
+    html+='<div class="sim-measure-row" data-siglabel="'+esc(m.name||'')+'">'+
+      '<input type="checkbox" data-mi="'+i+'"'+(m.enabled===false?'':' checked')+' title="include in the netlist">'+
+      '<span class="sim-measure-name">'+esc(m.name||'?')+'</span>'+
+      '<span class="sim-measure-summary">'+esc(measureSummary(m))+'</span>'+
+      resHtml+
+      '<button title="edit" onclick="openMeasureModal('+i+')">✎</button>'+
+      '<button title="remove" onclick="removeMeasurement('+i+')">&times;</button>'+
+      '</div>';
+  }
+  host.innerHTML=html;
+  applySignalColors();
+  host.querySelectorAll('[data-mi]').forEach(function(inp){
+    var idx=parseInt(inp.getAttribute('data-mi'),10);
+    inp.addEventListener('change',function(){
+      simMeasurements[idx].enabled=inp.checked;
+      saveSimSettings();
+      renderMeasureList();
+    });
+  });
+}
+
+function removeMeasurement(i){
+  simMeasurements.splice(i,1);
+  saveSimSettings();
+  renderMeasureList();
+}
+
+function nextMeasureName(){
+  var used={};
+  simMeasurements.forEach(function(m){used[m.name]=true;});
+  var n=1;
+  while(used['meas'+n])n++;
+  return 'meas'+n;
+}
+
+// First/last x value of the last run (start/end of the sweep) — the default
+// range statistics start with, so a fresh measurement reads "whole run" up
+// front instead of an empty FROM/TO.
+function sweepBounds(){
+  var xv=simLastResult&&simLastResult.data&&simLastResult.data[0]&&simLastResult.data[0].values;
+  if(!xv||!xv.length)return null;
+  return [_re(xv[0]),_re(xv[xv.length-1])];
+}
+
+function newMeasurementDraft(){
+  var b=sweepBounds();
+  return {
+    id:'m'+(MEASURE_NEXT_ID++),
+    name:nextMeasureName(),
+    enabled:true,
+    kind:'stat',
+    stat:{func:'PP',sig:'',from:b?fmtSpiceEng(b[0],6):'',to:b?fmtSpiceEng(b[1],6):''},
+    findAt:{expr:'',at:''},
+    findWhen:{expr:'',whenSig:'',whenVal:'',td:'',edge:'CROSS',count:''},
+    trigTarg:{trigSig:'',trigVal:'',trigEdge:'RISE',trigCount:'',trigTd:'',
+              targSig:'',targVal:'',targEdge:'RISE',targCount:'',targTd:''}
+  };
+}
+
+// Which draft field each plot cursor drives, per kind — one table shared by
+// the "grab from cursor" buttons (mfld's opts.cursorTime) and the live
+// auto-sync below, so the two never drift apart.
+var MEASURE_CURSOR_TIME_FIELDS={
+  stat:{1:'stat.from',2:'stat.to'},
+  find_at:{1:'findAt.at'},
+  find_when:{1:'findWhen.td'},
+  trig_targ:{1:'trigTarg.trigTd',2:'trigTarg.targTd'}
+};
+
+// Signal fields per kind, in fill order — drives both the default "probe
+// target" when the overlay opens (no click into a field needed first) and
+// the auto-advance after each probe (trig then targ, or expr then when-sig).
+var MEASURE_SIGNAL_FIELDS_BY_KIND={
+  stat:['stat.sig'],
+  find_at:['findAt.expr'],
+  find_when:['findWhen.expr','findWhen.whenSig'],
+  trig_targ:['trigTarg.trigSig','trigTarg.targSig']
+};
+
+// Placing/moving a cursor while the overlay is open re-fills whichever time
+// field(s) that cursor drives for the current kind — no manual grab-button
+// click needed while you're actively dialing in a window on the plot.
+function syncMeasureDraftCursorTimes(){
+  if(!simMeasureDraft)return;
+  var d=simMeasureDraft.data;
+  var map=MEASURE_CURSOR_TIME_FIELDS[d.kind];
+  if(!map)return;
+  var changed=false;
+  [1,2].forEach(function(n){
+    var path=map[n];
+    if(!path)return;
+    var c=simCursors[n-1];
+    if(!c)return;
+    var cv=cursorValuesAt(c.idx);
+    if(!cv)return;
+    var p=path.split('.');
+    d[p[0]][p[1]]=fmtSpiceEng(cv.x,6);
+    changed=true;
+  });
+  if(changed)renderMeasureModal();
+}
+
+// Probing a net/pin on the schematic while the overlay is open drops that
+// signal straight into whichever signal field you last focused — the same
+// "grab it live" idea as the cursor auto-sync above, just sourced from the
+// canvas instead of the plot. Only fires for newly *added* probes (the call
+// sites in toggleProbeAt/addDiffProbe skip it on removal).
+// Does `expr` resolve to (a) real vector(s) from the last run? We only ever
+// generate two shapes ourselves — a bare vector name, or our own
+// "V(a)-V(b)" differential form — so a plain membership check plus splitting
+// that one known shape covers everything, no general expression parser
+// needed. Formula names (e.g. a user-defined "P_R1") are deliberately NOT
+// found here: ngspice's own .measure only ever sees real netlist vectors, it
+// has no idea our formulas exist (those are computed client-side, after the
+// run) — so a formula name is exactly as "not a real signal" as a stale or
+// misspelled one, and gets the same warn-and-discard treatment.
+function measureExprResolvable(expr){
+  var names=availableSignalNames();
+  if(!names.length)return false;
+  var have={};
+  for(var i=0;i<names.length;i++)have[names[i].toLowerCase()]=true;
+  var diff=/^V\(([^)]+)\)-V\(([^)]+)\)$/i.exec(expr);
+  if(diff)return !!(have['v('+diff[1].toLowerCase()+')']&&have['v('+diff[2].toLowerCase()+')']);
+  return !!have[String(expr).toLowerCase()];
+}
+
+// Surface a probe-fill problem both in the status bar (consistent with every
+// other probe message) and inline in the still-open overlay (reusing the
+// name-validation error slot — this call site never re-renders on failure,
+// so the element is still the one currently in the DOM).
+function showMeasureModalWarning(msg){
+  hint(msg);
+  var el=document.getElementById('measure-modal-error');
+  if(el)el.textContent=msg;
+}
+
+function feedProbeToMeasureModal(pr){
+  if(!simMeasureDraft)return;
+  var d=simMeasureDraft.data;
+  var fields=MEASURE_SIGNAL_FIELDS_BY_KIND[d.kind]||[];
+  if(!fields.length)return;
+  // Target whichever field was last focused, if it belongs to the current
+  // kind — otherwise (nothing focused yet, e.g. right after opening the
+  // overlay) default to the first signal field so a probe works immediately.
+  var path=(simMeasureActiveSigPath&&fields.indexOf(simMeasureActiveSigPath)>=0)?simMeasureActiveSigPath:fields[0];
+  // Resolved the same way the plot resolves a current probe (probeVectorKey
+  // tries every candidate vector against the last run — this is exactly how
+  // e.g. an inductor's two pins both land on its single "@l1[i]" branch
+  // current instead of conflicting).
+  var vec=(pr.kind==='Vd')
+    ?('V('+pr.p+')-V('+pr.n+')')
+    :probeVectorKey(pr,simLastResult?vectorMapOf(simLastResult):null);
+  if(!vec)return;
+  if(!simLastResult){
+    showMeasureModalWarning('Run the simulation once before probing a signal into a measurement — there\'s no result yet to check it against.');
+    return;
+  }
+  if(!measureExprResolvable(vec)){
+    showMeasureModalWarning('Probed signal "'+vec+'" isn\'t among the last run\'s vectors — discarded. (A formula result can\'t be used here either: .measure only sees ngspice\'s own vectors.)');
+    return;
+  }
+  var p=path.split('.');
+  d[p[0]][p[1]]=vec;
+  // Advance to the next signal field of this kind (trig -> targ, expr -> when-
+  // signal), so a second probe click fills the next slot without having to
+  // click into it by hand first.
+  var idx=fields.indexOf(path);
+  simMeasureActiveSigPath=(idx>=0&&idx+1<fields.length)?fields[idx+1]:path;
+  renderMeasureModal();
+}
+
+// index===-1 opens a fresh draft; otherwise a deep copy of simMeasurements[index]
+// so Cancel leaves the stored entry untouched.
+function openMeasureModal(index){
+  var data=(index>=0&&simMeasurements[index])
+    ?JSON.parse(JSON.stringify(simMeasurements[index]))
+    :newMeasurementDraft();
+  simMeasureDraft={index:index,data:data};
+  // Default probe target is the kind's first signal field, so probing works
+  // right after opening the overlay — no click into a field needed first.
+  simMeasureActiveSigPath=(MEASURE_SIGNAL_FIELDS_BY_KIND[data.kind]||[])[0]||null;
+  var modal=document.getElementById('measure-modal');
+  if(!modal)return;
+  renderMeasureModal();
+  modal.style.display='block';
+  // No full-screen backdrop (see .measure-modal-body / #measure-modal CSS) —
+  // the plot stays clickable behind it so cursors can still be placed while
+  // the overlay is open. Reset to the default docked position each time it's
+  // (re)opened, in case a previous drag left it somewhere awkward, then clamp
+  // its height so it doesn't itself sit on top of the plot pane.
+  modal.style.left='';modal.style.top='';modal.style.right='';
+  positionMeasureModalClearOfPlot(modal);
+  initMeasureModalDrag();
+}
+
+// The overlay docks top-right by default (see .measure-overlay CSS), clear of
+// the plot in most window sizes — but the plot pane is user-resizable, so
+// clamp the overlay's height to whatever room is actually left above it
+// rather than trusting a fixed vh guess.
+function positionMeasureModalClearOfPlot(modal){
+  var content=modal.querySelector('.modal-content');
+  if(!content)return;
+  content.style.maxHeight='';
+  var pane=document.getElementById('sim-pane');
+  if(!pane||pane.style.display==='none')return;
+  var paneTop=pane.getBoundingClientRect().top;
+  var modalTop=modal.getBoundingClientRect().top;
+  var avail=paneTop-modalTop-12;
+  if(avail>150)content.style.maxHeight=avail+'px';
+}
+function closeMeasureModal(){
+  simMeasureDraft=null;
+  simMeasureActiveSigPath=null;
+  var modal=document.getElementById('measure-modal');
+  if(modal)modal.style.display='none';
+}
+
+// Drag the overlay by its header — there's no backdrop to click through, so
+// this is the way out if it ends up sitting over the plot. Bound once.
+var measureModalDragInit=false;
+function initMeasureModalDrag(){
+  if(measureModalDragInit)return;
+  measureModalDragInit=true;
+  var modal=document.getElementById('measure-modal');
+  var header=modal&&modal.querySelector('.modal-header');
+  if(!modal||!header)return;
+  var dragging=false,startX,startY,startLeft,startTop;
+  header.addEventListener('mousedown',function(e){
+    if(e.target.closest&&e.target.closest('.modal-close'))return;
+    dragging=true;
+    var r=modal.getBoundingClientRect();
+    startX=e.clientX;startY=e.clientY;startLeft=r.left;startTop=r.top;
+    modal.style.right='';modal.style.left=startLeft+'px';modal.style.top=startTop+'px';
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove',function(e){
+    if(!dragging)return;
+    modal.style.left=Math.max(0,startLeft+(e.clientX-startX))+'px';
+    modal.style.top=Math.max(0,startTop+(e.clientY-startY))+'px';
+  });
+  document.addEventListener('mouseup',function(){dragging=false;});
+}
+function deleteMeasureModal(){
+  if(!simMeasureDraft||simMeasureDraft.index<0)return;
+  simMeasurements.splice(simMeasureDraft.index,1);
+  saveSimSettings();
+  closeMeasureModal();
+  renderMeasureList();
+}
+function saveMeasureModal(){
+  if(!simMeasureDraft)return;
+  var d=simMeasureDraft.data;
+  var errEl=document.getElementById('measure-modal-error');
+  var name=(d.name||'').trim();
+  if(!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)){
+    if(errEl)errEl.textContent='Name must be a valid identifier (letters, digits, _ — starting with a letter or _).';
+    return;
+  }
+  var clash=false;
+  for(var i=0;i<simMeasurements.length;i++){
+    if(i!==simMeasureDraft.index&&simMeasurements[i].name===name)clash=true;
+  }
+  if(clash){
+    if(errEl)errEl.textContent='Another measurement already uses this name.';
+    return;
+  }
+  d.name=name;
+  if(simMeasureDraft.index>=0)simMeasurements[simMeasureDraft.index]=d;
+  else simMeasurements.push(d);
+  saveSimSettings();
+  closeMeasureModal();
+  renderMeasureList();
+}
+
+// One labeled field, plain text or (opts.signal) a text field with a live,
+// filtered dropdown of availableSignalNames() (the same list the "Result
+// vectors" picker shows) underneath — shown as soon as the field is focused
+// and re-filtered on every keystroke, not hidden behind a native <select> or
+// <datalist> popup (those only opened on a second click, which wasn't
+// obvious). Free text is still accepted; the dropdown is a suggestion list,
+// not a hard constraint. Optionally a cursor grab button. opts.cursorTime: N
+// -> fill from plot cursor N's x value. opts.cursorVal: '<path.to.signal>' ->
+// fill from cursor 1's y value on whichever signal that other field names.
+function mfld(path,label,val,opts){
+  opts=opts||{};
+  var btn='';
+  if(opts.cursorTime){
+    btn='<button type="button" class="sim-cursor-grab" data-mf-cursor="'+path+'" data-mf-cursor-n="'+opts.cursorTime+'" title="fill from plot cursor '+opts.cursorTime+'">⌖'+opts.cursorTime+'</button>';
+  }else if(opts.cursorVal){
+    btn='<button type="button" class="sim-cursor-grab" data-mf-cursor="'+path+'" data-mf-cursor-sig="'+opts.cursorVal+'" title="fill from cursor 1, at the picked signal">⌖</button>';
+  }
+  if(opts.signal){
+    return '<div class="sim-field measure-field-row measure-sig-field"><label>'+label+'</label>'+
+      '<input type="text" data-mf="'+path+'" data-mf-sig="1" value="'+esc(String(val==null?'':val))+'" autocomplete="off" spellcheck="false">'+
+      '<div class="measure-sig-dropdown" data-mf-sig-dropdown="'+path+'"></div>'+
+      btn+'</div>';
+  }
+  return '<div class="sim-field measure-field-row"><label>'+label+'</label>'+
+    '<input type="text" data-mf="'+path+'" value="'+esc(String(val==null?'':val))+'" spellcheck="false">'+
+    btn+'</div>';
+}
+function edgeSelect(path,val){
+  return '<div class="sim-field"><label>Edge</label><select data-mf="'+path+'">'+
+    ['RISE','FALL','CROSS'].map(function(e){return '<option value="'+e+'"'+((val||'CROSS')===e?' selected':'')+'>'+e+'</option>';}).join('')+
+    '</select></div>';
+}
+
+function updateMeasurePreview(){
+  var el=document.getElementById('measure-preview');
+  if(!el||!simMeasureDraft)return;
+  var line=buildMeasureLine(simMeasureDraft.data);
+  el.textContent=line||'(fill in the required fields)';
+  var errEl=document.getElementById('measure-modal-error');
+  if(errEl)errEl.textContent='';
+}
+
+function renderMeasureModal(){
+  var body=document.getElementById('measure-modal-body');
+  if(!body||!simMeasureDraft)return;
+  var d=simMeasureDraft.data;
+  var kindOpts=[['stat','Range statistic (MAX / MIN / PP / AVG / RMS / INTEG)'],
+                ['find_at','Find value at a fixed time'],
+                ['find_when','Find value when a signal crosses a level'],
+                ['trig_targ','Trigger → Target (delay)']];
+  var html='<div class="sim-field"><label>Name</label>'+
+    '<input type="text" id="measure-name-input" value="'+esc(d.name||'')+'" spellcheck="false"></div>'+
+    '<div class="sim-field"><label>Type</label><select id="measure-kind-select">'+
+    kindOpts.map(function(o){return '<option value="'+o[0]+'"'+(d.kind===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+
+    '</select></div>';
+
+  if(!availableSignalNames().length)html+='<div class="sim-hint-text">Run the simulation once to populate the signal list.</div>';
+  html+='<div class="sim-hint-text">Tip: switch to PROBE mode and probe a net or pin on the schematic — it fills the signal field directly (click into a different field first to target that one instead).</div>';
+
+  if(d.kind==='find_at'){
+    html+=mfld('findAt.expr','Signal',d.findAt.expr,{signal:true})+
+      mfld('findAt.at','At time',d.findAt.at,{cursorTime:1});
+  }else if(d.kind==='find_when'){
+    html+=mfld('findWhen.expr','Signal to read',d.findWhen.expr,{signal:true})+
+      mfld('findWhen.whenSig','…when this signal',d.findWhen.whenSig,{signal:true})+
+      mfld('findWhen.whenVal','…crosses this level',d.findWhen.whenVal,{cursorVal:'findWhen.whenSig'})+
+      '<div class="sim-grid">'+
+      mfld('findWhen.td','Delay (TD, opt.)',d.findWhen.td,{cursorTime:1})+
+      edgeSelect('findWhen.edge',d.findWhen.edge)+
+      mfld('findWhen.count','Occurrence # (opt.)',d.findWhen.count,{})+
+      '</div>';
+  }else if(d.kind==='trig_targ'){
+    html+='<div class="sim-hint-text">TRIG — the starting event:</div>'+
+      mfld('trigTarg.trigSig','Signal',d.trigTarg.trigSig,{signal:true})+
+      mfld('trigTarg.trigVal','Level (VAL)',d.trigTarg.trigVal,{cursorVal:'trigTarg.trigSig'})+
+      '<div class="sim-grid">'+
+      mfld('trigTarg.trigTd','Delay (TD, opt.)',d.trigTarg.trigTd,{cursorTime:1})+
+      edgeSelect('trigTarg.trigEdge',d.trigTarg.trigEdge)+
+      mfld('trigTarg.trigCount','Occurrence # (opt.)',d.trigTarg.trigCount,{})+
+      '</div>'+
+      '<div class="sim-hint-text">TARG — the ending event:</div>'+
+      mfld('trigTarg.targSig','Signal',d.trigTarg.targSig,{signal:true})+
+      mfld('trigTarg.targVal','Level (VAL)',d.trigTarg.targVal,{cursorVal:'trigTarg.targSig'})+
+      '<div class="sim-grid">'+
+      mfld('trigTarg.targTd','Delay (TD, opt.)',d.trigTarg.targTd,{cursorTime:2})+
+      edgeSelect('trigTarg.targEdge',d.trigTarg.targEdge)+
+      mfld('trigTarg.targCount','Occurrence # (opt.)',d.trigTarg.targCount,{})+
+      '</div>';
+  }else{
+    html+='<div class="sim-field"><label>Function</label><select data-mf="stat.func">'+
+      ['MAX','MIN','PP','AVG','RMS','INTEG'].map(function(f){return '<option value="'+f+'"'+(d.stat.func===f?' selected':'')+'>'+f+'</option>';}).join('')+
+      '</select></div>'+
+      mfld('stat.sig','Signal',d.stat.sig,{signal:true})+
+      '<div class="sim-grid">'+
+      mfld('stat.from','From (opt.)',d.stat.from,{cursorTime:1})+
+      mfld('stat.to','To (opt.)',d.stat.to,{cursorTime:2})+
+      '</div>';
+  }
+
+  html+='<div class="sim-hint-text">Card: <code id="measure-preview"></code></div>'+
+    '<div id="measure-modal-error" class="sim-f-error"></div>'+
+    '<div class="measure-modal-footer">'+
+      (simMeasureDraft.index>=0?'<button class="tb-btn" onclick="deleteMeasureModal()">Delete</button>':'')+
+      '<span style="flex:1"></span>'+
+      '<button class="tb-btn" onclick="closeMeasureModal()">Cancel</button>'+
+      '<button class="tb-btn tb-btn-sim" onclick="saveMeasureModal()">Save</button>'+
+    '</div>';
+
+  body.innerHTML=html;
+  updateMeasurePreview();
+
+  var nameInput=document.getElementById('measure-name-input');
+  if(nameInput)nameInput.addEventListener('input',function(){d.name=nameInput.value;updateMeasurePreview();});
+  var kindSel=document.getElementById('measure-kind-select');
+  if(kindSel)kindSel.addEventListener('change',function(){
+    d.kind=kindSel.value;
+    simMeasureActiveSigPath=(MEASURE_SIGNAL_FIELDS_BY_KIND[d.kind]||[])[0]||null;
+    renderMeasureModal();
+  });
+
+  body.querySelectorAll('[data-mf]').forEach(function(inp){
+    var path=inp.getAttribute('data-mf').split('.');
+    var ev=(inp.tagName==='SELECT')?'change':'input';
+    inp.addEventListener(ev,function(){
+      d[path[0]][path[1]]=inp.value;
+      updateMeasurePreview();
+    });
+  });
+  body.querySelectorAll('[data-mf-cursor]').forEach(function(btn){
+    btn.addEventListener('click',function(){
+      var path=btn.getAttribute('data-mf-cursor').split('.');
+      var n=btn.getAttribute('data-mf-cursor-n');
+      var sigPath=btn.getAttribute('data-mf-cursor-sig');
+      if(n){
+        var cIdx=simCursors[parseInt(n,10)-1]&&simCursors[parseInt(n,10)-1].idx;
+        var cv=cursorValuesAt(cIdx);
+        if(!cv){hint('Place cursor '+n+' on the plot first (click a curve).');return;}
+        d[path[0]][path[1]]=fmtSpiceEng(cv.x,6);
+      }else if(sigPath){
+        var sp=sigPath.split('.');
+        var sigName=d[sp[0]][sp[1]];
+        if(!sigName){hint('Pick a signal first.');return;}
+        var c1Idx=simCursors[0]&&simCursors[0].idx;
+        var cv1=cursorValuesAt(c1Idx);
+        if(!cv1){hint('Place a cursor on the plot first (click a curve).');return;}
+        var match=null;
+        for(var si=0;si<cv1.series.length;si++){
+          if(String(cv1.series[si].label).toLowerCase()===String(sigName).toLowerCase()){match=cv1.series[si];break;}
+        }
+        if(!match||match.value==null){hint('That signal isn\'t currently plotted at the cursor.');return;}
+        d[path[0]][path[1]]=fmtSpiceEng(match.value,6);
+      }
+      renderMeasureModal();
+    });
+  });
+
+  // Signal fields: a filtered dropdown shown on focus (and re-filtered on
+  // every keystroke) instead of relying on a native popup that only opened
+  // on a second click. Selecting an item just writes the input's value and
+  // replays the same 'input' event the [data-mf] loop above already listens
+  // for, so the draft update / preview refresh stays in one place.
+  body.querySelectorAll('[data-mf-sig]').forEach(function(inp){
+    var path=inp.getAttribute('data-mf');
+    var dd=body.querySelector('[data-mf-sig-dropdown="'+path+'"]');
+    if(!dd)return;
+    function renderDropdown(){
+      var q=inp.value.toLowerCase();
+      var all=availableSignalNames();
+      var names=all.filter(function(n){return !q||n.toLowerCase().indexOf(q)>=0;});
+      if(!names.length){
+        dd.innerHTML='<div class="measure-sig-empty">'+
+          (all.length?'no match':'run the simulation once to populate the signal list')+'</div>';
+      }else{
+        dd.innerHTML=names.map(function(n){return '<div class="measure-sig-item" data-sig-name="'+esc(n)+'">'+esc(n)+'</div>';}).join('');
+      }
+      dd.classList.add('open');
+    }
+    inp.addEventListener('focus',function(){simMeasureActiveSigPath=path;renderDropdown();});
+    inp.addEventListener('input',renderDropdown);
+    // A blur right after clicking a dropdown item would hide it before the
+    // click lands — the mousedown handler below preventDefaults that click's
+    // focus loss, but the short delay here is a safety net either way.
+    inp.addEventListener('blur',function(){ setTimeout(function(){dd.classList.remove('open');},150); });
+    dd.addEventListener('mousedown',function(e){
+      var item=e.target.closest&&e.target.closest('[data-sig-name]');
+      if(!item)return;
+      e.preventDefault();
+      inp.value=item.getAttribute('data-sig-name');
+      inp.dispatchEvent(new Event('input',{bubbles:true}));
+      dd.classList.remove('open');
+    });
+  });
+}
+
 function plotResult(result){
   var container=document.getElementById('sim-plot');
   if(!container)return;
@@ -807,6 +1438,21 @@ function trimNum(v,digits){
   if(s.indexOf('.')>=0)s=s.replace(/0+$/,'').replace(/\.$/,'');
   return s==='-0'?'0':s;
 }
+// SPICE-legal engineering suffixes only — no unicode 'µ' (ngspice wants ASCII
+// 'u') and no bare 'M' (ngspice reads that as milli, not mega; mega is "Meg").
+// Used for numbers that get typed straight into a .measure line (FROM/TO/AT/
+// TD/VAL), as opposed to fmtEng()'s display-only suffixes.
+var SPICE_SI_PREFIX=[[1e12,'T'],[1e9,'G'],[1e6,'Meg'],[1e3,'k'],[1,''],[1e-3,'m'],[1e-6,'u'],[1e-9,'n'],[1e-12,'p'],[1e-15,'f']];
+function fmtSpiceEng(v,digits){
+  if(v==null||typeof v!=='number'||!isFinite(v))return '';
+  if(v===0)return '0';
+  var mag=Math.abs(v),e=SPICE_SI_PREFIX[SPICE_SI_PREFIX.length-1];
+  for(var i=0;i<SPICE_SI_PREFIX.length;i++){
+    if(mag>=SPICE_SI_PREFIX[i][0]*0.999999){e=SPICE_SI_PREFIX[i];break;}
+  }
+  return trimNum(v/e[0],digits||6)+e[1];
+}
+
 // Single value with its own prefix, e.g. fmtEng(2e-3,5,'s') -> "2 ms".
 function fmtEng(v,digits,unit){
   unit=unit||'';
@@ -925,6 +1571,7 @@ function addSimCursorClick(u,idx){
   if(simCursors.length>=2)simCursors.shift();
   simCursors.push({idx:idx});
   renderSimCursorsUI(u);
+  syncMeasureDraftCursorTimes();
 }
 
 // Nearest data index for a client-X coordinate, found directly from the x
@@ -948,6 +1595,21 @@ function idxAtClientX(u,clientX){
   return (val-xs[lo]<=xs[hi]-val)?lo:hi;
 }
 
+// x + every visible series' value at a given data-array index — the same
+// lookup renderSimCursorsUI needs for its Δ table, factored out so the
+// measurement overlay's "grab from cursor" buttons can reuse it.
+function cursorValuesAt(idx){
+  if(idx==null||!simPlot||!simPlot.data[0]||simPlot.data[0][idx]==null)return null;
+  var x=simPlot.data[0][idx],vals=[];
+  for(var s=1;s<simPlot.series.length;s++){
+    var ser=simPlot.series[s];
+    if(ser.show===false)continue;
+    var d=simPlot.data[s];
+    vals.push({label:ser.label,value:d?d[idx]:null});
+  }
+  return {x:x,series:vals};
+}
+
 function renderSimCursorsUI(u){
   if(!u||!u.over)return;
   var markersEl=u.over.querySelector('.sim-cursor-markers');
@@ -967,23 +1629,20 @@ function renderSimCursorsUI(u){
     markersEl.appendChild(m);
   }
   if(simCursors.length<2){overlayEl.style.display='none';overlayEl.innerHTML='';return;}
-  var i1=simCursors[0].idx,i2=simCursors[1].idx;
-  if(u.data[0][i1]==null||u.data[0][i2]==null){overlayEl.style.display='none';return;}
-  var x1=u.data[0][i1],x2=u.data[0][i2];
+  var c1=cursorValuesAt(simCursors[0].idx),c2=cursorValuesAt(simCursors[1].idx);
+  if(!c1||!c2){overlayEl.style.display='none';return;}
   var dtLabel=(simXUnit==='Hz')?'Δf':'Δt';
   var html='<div class="sim-cursor-hdr">1 → 2</div>'+
-    '<div class="sim-cursor-row sim-cursor-dt">'+esc(dtLabel)+': '+fmtEng(x2-x1,5,simXUnit)+'</div>';
-  for(var s=1;s<u.series.length;s++){
-    var ser=u.series[s];
-    if(ser.show===false)continue;
-    var d=u.data[s];
-    var v1=d?d[i1]:null,v2=d?d[i2]:null;
+    '<div class="sim-cursor-row sim-cursor-dt">'+esc(dtLabel)+': '+fmtEng(c2.x-c1.x,5,simXUnit)+'</div>';
+  for(var s=0;s<c1.series.length;s++){
+    var v1=c1.series[s].value,v2=c2.series[s]?c2.series[s].value:null;
     if(v1==null||v2==null||!isFinite(v1)||!isFinite(v2))continue;
     // ser.stroke is uPlot's internal accessor, not the hex string — see the
     // same note in simTooltipPlugin.
-    var col=simSeriesColor[String(ser.label).toLowerCase()]||'#888';
+    var lbl=c1.series[s].label;
+    var col=simSeriesColor[String(lbl).toLowerCase()]||'#888';
     html+='<div class="sim-cursor-row"><span class="sim-cursor-dot" style="background:'+col+'"></span>'+
-      '<span class="sim-cursor-lbl">'+esc(String(ser.label))+'</span>'+
+      '<span class="sim-cursor-lbl">'+esc(String(lbl))+'</span>'+
       '<span class="sim-cursor-val">Δ'+fmtEng(v2-v1,5)+'</span></div>';
   }
   overlayEl.innerHTML=html;
@@ -1195,6 +1854,7 @@ function toggleProbeAt(x,y){
       S.probes.push(pr);
       selectProbeVector(pr,true);
       hint('Current probe added: '+lbl);
+      feedProbeToMeasureModal(pr);
     }
     _afterProbeChange();
     return;
@@ -1211,6 +1871,7 @@ function toggleProbeAt(x,y){
     S.probes.push({kind:'V',net:net});
     setSelected('v('+net+')',true);
     hint('Probe added: V('+net+')');
+    feedProbeToMeasureModal({kind:'V',net:net});
   }
   _afterProbeChange();
 }
@@ -1236,6 +1897,7 @@ function addDiffProbe(x1,y1,x2,y2){
     if(!S.probes.some(function(p){return p.kind==='V'&&p.net===net;})){S.probes.push({kind:'V',net:net});}
     setSelected('v('+net+')',true);
     hint('Probe added: V('+net+')');
+    feedProbeToMeasureModal({kind:'V',net:net});
     _afterProbeChange();return;
   }
   if(S.probes.some(function(p){return p.kind==='Vd'&&p.p===a&&p.n===b;})){
@@ -1244,6 +1906,7 @@ function addDiffProbe(x1,y1,x2,y2){
   dropAutoSelection();
   S.probes.push({kind:'Vd',p:a,n:b});
   hint('Probe added: V('+a+')-V('+b+')');
+  feedProbeToMeasureModal({kind:'Vd',p:a,n:b});
   _afterProbeChange();
 }
 
@@ -1392,6 +2055,7 @@ function setSimPanel(on){
     renderAnalysisPanel();
     renderFormulaList();
     renderProbeList();
+    renderMeasureList();
   }else{
     settings.style.display='none';
     if(typeof renderProps==='function')renderProps(); // restore the normal properties view
@@ -1422,6 +2086,8 @@ function showSimPanel(){ setSimPanel(true); }
       pane.style.height=h+'px';
       if(typeof applyView==='function')applyView();
       if(simPlot)resizeSimPlot();
+      var mm=document.getElementById('measure-modal');
+      if(mm&&mm.style.display!=='none')positionMeasureModalClearOfPlot(mm);
     });
     document.addEventListener('mouseup',function(){
       if(!dragging)return;
@@ -1456,6 +2122,7 @@ function applySimConfigCollapse(){
     renderAnalysisPanel();
     renderFormulaList();
     renderProbeList();
+    renderMeasureList();
     applySimConfigCollapse();
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',attach);else attach();
@@ -1468,7 +2135,11 @@ function resizeSimPlot(){
   if(simPlot.width===w&&simPlot.height===h)return;
   simPlot.setSize({width:w,height:h});
 }
-window.addEventListener('resize',function(){ if(simViewActive&&simPlot)resizeSimPlot(); });
+window.addEventListener('resize',function(){
+  if(simViewActive&&simPlot)resizeSimPlot();
+  var mm=document.getElementById('measure-modal');
+  if(mm&&mm.style.display!=='none')positionMeasureModalClearOfPlot(mm);
+});
 
 // Catch-all: the plot container also changes size when a sidebar is dragged or
 // a panel is toggled, which no resize event reports.

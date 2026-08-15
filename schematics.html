@@ -211,6 +211,11 @@
         <div id="sim-formula-list" class="sim-formula-list"></div>
         <button class="tb-btn" style="margin-top:6px;font-size:10px;padding:3px 8px;align-self:flex-start" onclick="addFormula()">+ Add formula</button>
       </div>
+      <div class="sim-row">
+        <label class="sim-label">Measurements <span class="sim-sub">(.measure — delays, thresholds, range statistics)</span></label>
+        <div id="sim-measure-list" class="sim-measure-list"></div>
+        <button id="sim-measure-add-btn" class="tb-btn" style="margin-top:6px;font-size:10px;padding:3px 8px;align-self:flex-start" onclick="openMeasureModal(-1)">+ Add measurement</button>
+      </div>
       <div class="sim-row" style="flex-direction:row;align-items:center;gap:10px;flex-wrap:wrap">
         <button id="sim-run-btn" class="props-apply" style="width:auto;margin:0;padding:8px 18px" onclick="runSimulation()">Run</button>
         <span id="sim-status" class="sim-status">Idle.</span>
@@ -237,6 +242,16 @@
     <div class="modal-header">SPICE Netlist<button class="modal-close" onclick="closeNetlist()">&times;</button></div>
     <textarea id="netlist-text" readonly></textarea>
     <button class="tb-btn" onclick="copyNetlist()">Copy to Clipboard</button>
+  </div>
+</div>
+
+<!-- Not a .modal: deliberately no full-screen backdrop, so the simulation plot
+     stays clickable behind it and cursors can still be placed while this is
+     open. Floats as its own docked, draggable (by its header) panel instead. -->
+<div id="measure-modal" class="measure-overlay" style="display:none">
+  <div class="modal-content" style="width:480px">
+    <div class="modal-header">Measurement<button class="modal-close" onclick="closeMeasureModal()">&times;</button></div>
+    <div id="measure-modal-body" class="measure-modal-body"></div>
   </div>
 </div>
 
