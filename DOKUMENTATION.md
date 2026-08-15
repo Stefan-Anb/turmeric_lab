@@ -541,6 +541,7 @@ Vorteile:
 > - **Raw-Modus (Checkbox):** Hält alle Vektoren des Laufs vor und blendet einen
 >   Vektor-Picker (Checkboxen je Signal) ein; die Plot-Auswahl erfolgt dann
 >   nachträglich unabhängig von der Canvas-Probe-Auswahl.
+>   *(Überholt durch die gemeinsame Signalauswahl, siehe Nachtrag unten.)*
 > - **Default-Modelle bedarfsgerecht:** Es werden nur `.model`-Karten der
 >   tatsächlich platzierten Bauteilklassen emittiert (siehe 3.2 #2).
 > - **Direktiven:** Textfeld im Modal (`.tran`/`.op`/`.ac`/`.dc`); hier lassen
@@ -572,6 +573,55 @@ Vorteile:
 >   `.dc Srcnam Vstart Vstop Vincr [Src2 …]`), Vorschau der Karte inline.
 >   `Manual` überlässt die Analysekarte wieder dem Direktivenfeld.
 >   Analyse, Formeln und Direktiven liegen in `localStorage['sim_settings']`.
+> - **Gemeinsame Signalauswahl:** Probes und Vektor-Picker editieren *eine*
+>   Auswahl (`simSelection`, Map Vektorname → true). Ein Probe-Klick trägt den
+>   zugehörigen Ergebnisvektor ein (`v(net)` bzw. die aufgelöste Stromkandidate),
+>   ein Häkchen im Picker denselben Eintrag; wird ein geprobtes Signal dort
+>   abgewählt, verschwindet auch der Probe. `simSelectionAuto` bedeutet "der
+>   Nutzer hat noch nichts gewählt" — dann wird die Auswahl je Lauf aus allen
+>   Knotenspannungen abgeleitet; der erste Probe ersetzt diesen Automatiksatz.
+>   Bei jedem neuen Lauf gleicht `reconcileSelection()` die Auswahl gegen das
+>   Ergebnis ab: Bekanntes bleibt erhalten (die Auswahl überlebt also mehrere
+>   Läufe), Verschwundenes wird still entfernt — inklusive der zugehörigen
+>   Probes, weil eine geänderte Netzliste Signale legitim wegfallen lässt.
+>   Die Chip-Liste zeigt entsprechend alles Geplottete, nicht nur die Probes.
+>   Der Automatiksatz enthält nur Knotenspannungen der tatsächlich gezeichneten
+>   Netze — Subcircuit-Interna (`v(xpwm1.saw)`, `v(xscr1.st)` …) bleiben außen
+>   vor — ebenso geräteinterne Knoten wie `v(mm1#gate)` (VDMOS-Gate hinter RG) —,
+>   sind aber weiterhin im Vektor-Picker anwählbar.
+>   `Clear selection` leert wirklich (danach wird nichts geplottet, der
+>   Plotbereich sagt das auch), `All node voltages` stellt den Automatiksatz
+>   wieder her, `All signals` wählt alles inklusive Bauteilströme.
+> - **Alle Signale speichern (Default):** Die Checkbox "Save & list all signals"
+>   ist voreingestellt aktiv, sorgt dafür, dass Bauteilströme im Ergebnis liegen
+>   und nachträglich auswählbar sind, und blendet zugleich die Vektorliste ein.
+>   Der Zustand liegt in `localStorage['sim_settings']`.
+>   **`.options savecurrents` ist dafür unbrauchbar:** es fordert pauschal jeden
+>   Anschluss jedes Bauteils an, beim VDMOS also auch `@m1[ib]` — das Bulk gibt
+>   es dort nicht, ngspice bricht daraufhin die komplette Ergebnisausgabe ab
+>   ("Error during 'write': no writable vector found") und dieser WASM-Build
+>   kehrt danach gar nicht mehr zurück (Simulation hängt). Stattdessen baut
+>   `buildSaveVectors()` die Liste aus dem Schaltplan: `.save all` plus genau die
+>   Klemmenströme, die es beim jeweiligen Bauteiltyp gibt (R/C/L/S `[i]`, D
+>   `[id]`, Q `[ic]/[ib]/[ie]`, M `[id]/[ig]/[is]` **ohne** `[ib]`, Quellen
+>   `i(Vx)`). Interne Quellen unserer Subcircuits deckt `all` mit ab. Ein
+>   ungültiger Eintrag in `.save` ist dabei unkritisch — ngspice ignoriert ihn,
+>   anders als bei `savecurrents`.
+> - **Kurvenfarben in der Sidebar:** `plotResult` legt die Zuordnung
+>   Serienlabel → Farbe in `simSeriesColor` ab, `applySignalColors()` färbt
+>   damit Chips, Vektorliste und Formel-Swatches ein. Gefärbt wird per
+>   DOM-Durchlauf (Attribut `data-siglabel`) statt per Neu-Rendern, damit der
+>   Fokus in einem gerade bearbeiteten Eingabefeld nicht verloren geht.
+> - **GND gewinnt:** Ein Netz mit Massesymbol wird immer zu Knoten 0, auch wenn
+>   es zusätzlich einen Netznamen trägt (`netAtPointIsGnd()` in
+>   [netlist.js](js/netlist.js), zusätzlich in `getTempNetName()`). Vorher gewann
+>   das Label, das Netz hing in der Simulation in der Luft
+>   ("singular matrix: check node …").
+> - **Modellwahl:** Teilenummern am Symbol (2N2222, 1N4148, RED …) sind keine
+>   SPICE-Modelle. `pickModel()` nimmt die Teilenummer nur, wenn im Direktivenfeld
+>   tatsächlich ein `.model`/`.subckt` dieses Namens steht (`userDefinedModels()`),
+>   sonst das eingebaute Default-Modell — mit einer Notizzeile im Deck. Damit
+>   simuliert ein frisch platziertes Bauteil ohne Nacharbeit (behebt 3.2 #2).
 > - **Achsenbeschriftung:** Beide Achsen wählen ein gemeinsames SI-Präfix für das
 >   *sichtbare Fenster* (`axisValuesSI`), das Präfix folgt dabei der Spannweite,
 >   nicht dem Absolutwert — ein 20-µs-Ausschnitt eines 5-ms-Laufs wird also in µs

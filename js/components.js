@@ -293,7 +293,7 @@ const CD={
   },
   nmos:{
     lbl:'M',val:'2N7000',hitW:100,hitH:100,
-    props:{label:{l:'Reference'},value:{l:'Part'}},
+    props:{label:{l:'Reference'},value:{l:'Part'},rdson:{l:'Rds(on) (Ω)',def:'1m'}},
     pins:[{x:-40,y:0,n:'G'},{x:20,y:-40,n:'D'},{x:20,y:40,n:'S'}],
     draw(g,v){
       L(g,-40,0,-12,0,'comp-pin');

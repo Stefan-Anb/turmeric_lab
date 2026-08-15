@@ -324,8 +324,9 @@ function renderProps(){
       }
       html+='</div></div>';
     } else {
+      const ph=pd.def!=null?' placeholder="'+esc(String(pd.def))+'"':'';
       html+='<div class="prop-row"><div class="prop-lbl">'+pd.l+'</div>'+
-      '<input class="prop-input" data-key="'+key+'" type="text" value="'+esc(String(val))+'"/></div>';
+      '<input class="prop-input" data-key="'+key+'" type="text" value="'+esc(String(val))+'"'+ph+'/></div>';
     }
   }
   // properties apply immediately on change — no Apply button
@@ -2173,7 +2174,12 @@ function initResizer(sidebarId,resizerId,isLeft){
   function onMouseMove(e){
     var dx=e.clientX-startX;
     var newWidth=isLeft?startWidth-dx:startWidth+dx;
-    if(newWidth>=minWidth) sidebar.style.width=newWidth+'px';
+    if(newWidth<minWidth)return;
+    sidebar.style.width=newWidth+'px';
+    // The canvas and the plot pane grow/shrink with the sidebar, so their
+    // viewBox / canvas size has to follow.
+    applyView();
+    if(typeof resizeSimPlot==='function')resizeSimPlot();
   }
   function onMouseUp(){
     resizer.classList.remove('dragging');

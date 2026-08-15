@@ -191,7 +191,11 @@
       <div class="sim-row">
         <label class="sim-label">Plotted signals <span class="sim-sub">(probe mode P: pin = current, wire = voltage, drag = differential)</span></label>
         <div id="sim-probe-list" class="sim-probe-list"></div>
-        <button class="tb-btn" style="margin-top:6px;font-size:10px;padding:3px 8px;align-self:flex-start" onclick="clearProbes()">Clear selection</button>
+        <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+          <button class="tb-btn" style="font-size:10px;padding:3px 8px" onclick="clearProbes()" title="Plot nothing until you probe or tick a signal">Clear selection</button>
+          <button class="tb-btn" style="font-size:10px;padding:3px 8px" onclick="selectAllNodeVoltages()" title="Plot every node voltage of the schematic">All node voltages</button>
+          <button class="tb-btn" style="font-size:10px;padding:3px 8px" onclick="selectAllSignals()" title="Plot every vector of the last run, currents included">All signals</button>
+        </div>
       </div>
       <div class="sim-row">
         <label class="sim-label">Formulas <span class="sim-sub">(e.g. <code>V(out)-V(in)</code>, <code>V(out)*I(R1)</code>)</span></label>
@@ -203,7 +207,7 @@
         <span id="sim-status" class="sim-status">Idle.</span>
       </div>
       <div class="sim-row">
-        <label class="sim-check"><input type="checkbox" id="sim-raw-mode" onchange="onRawModeChange()"> Raw mode <span class="sim-sub">(keep all vectors, pick afterward)</span></label>
+        <label class="sim-check"><input type="checkbox" id="sim-raw-mode" checked onchange="onRawModeChange()"> Save &amp; list all signals <span class="sim-sub">(saves every device terminal current, so it can be picked afterwards)</span></label>
       </div>
       <div id="sim-raw-panel" class="sim-raw-panel" style="display:none"></div>
       <details class="sim-log-wrap"><summary>NGSpice log / netlist</summary><pre id="sim-log" class="sim-log"></pre></details>

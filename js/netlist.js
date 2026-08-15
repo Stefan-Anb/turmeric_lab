@@ -31,7 +31,50 @@ function getNetName(x,y){
   return null;
 }
 
+// ═══ GROUND ALWAYS WINS ═══
+// A net that carries a ground symbol IS node 0, no matter which label it also
+// has. Without this rule a labelled-and-grounded wire ends up as its own node
+// and floats in the simulation ("singular matrix").
+function gndPinAt(x,y){
+  for(var ci=0;ci<S.components.length;ci++){
+    var c=S.components[ci];
+    if(c.type!=='gnd')continue;
+    var tp=xfPin(CD.gnd.pins[0].x,CD.gnd.pins[0].y,c.rot||0,c.mirror||false);
+    if(c.x+tp.x===x&&c.y+tp.y===y)return true;
+  }
+  return false;
+}
+function netIdsTouchGnd(netIds){
+  for(var i=0;i<netIds.length;i++){
+    var w=S.wires.find(function(ww){return ww.id===netIds[i];});
+    if(!w||!w.points||!w.points.length)continue;
+    var eps=[w.points[0],w.points[w.points.length-1]];
+    for(var e=0;e<eps.length;e++)if(gndPinAt(eps[e].x,eps[e].y))return true;
+  }
+  return false;
+}
+function wireIdAt(x,y){
+  for(var wi=0;wi<S.wires.length;wi++){
+    var w=S.wires[wi];
+    if(!w.points||w.points.length<2)continue;
+    var f=w.points[0],l=w.points[w.points.length-1];
+    if((f.x===x&&f.y===y)||(l.x===x&&l.y===y))return w.id;
+  }
+  var j=juncAt(x,y);
+  if(j&&j.wires.length)return j.wires[0];
+  var seg=findWireSeg(x,y,10);
+  if(seg)return seg.wireId;
+  return null;
+}
+function netAtPointIsGnd(x,y){
+  if(gndPinAt(x,y))return true;
+  var wid=wireIdAt(x,y);
+  if(!wid)return false;
+  return netIdsTouchGnd(getNetWires(wid));
+}
+
 function getNetNameWithTempNames(x,y){
+  if(netAtPointIsGnd(x,y))return '0';
   var explicitNet=getNetName(x,y);
   if(explicitNet)return explicitNet;
   
@@ -108,33 +151,18 @@ function getTempNetName(wireId){
       if(processedWires[w.id])continue;
       var netIds=getNetWires(w.id);
       var netName=null;
-      for(var ni=0;ni<netIds.length;ni++){
-        var nw=S.wires.find(function(nwi){return nwi.id===netIds[ni];});
-        if(nw&&nw.net){netName=nw.net;break;}
-      }
-      if(!netName){
-        var hasGnd=false;
+      // Ground beats an explicit label — see netAtPointIsGnd() above.
+      if(netIdsTouchGnd(netIds)){
+        netName='0';
+      }else{
         for(var ni=0;ni<netIds.length;ni++){
           var nw=S.wires.find(function(nwi){return nwi.id===netIds[ni];});
-          if(!nw)continue;
-          var eps=[nw.points[0],nw.points[nw.points.length-1]];
-          for(var ei=0;ei<eps.length;ei++){
-            for(var ci=0;ci<S.components.length;ci++){
-              var c=S.components[ci];
-              if(c.type!=='gnd')continue;
-              var tp=xfPin(CD.gnd.pins[0].x,CD.gnd.pins[0].y,c.rot||0,c.mirror||false);
-              if(c.x+tp.x===eps[ei].x&&c.y+tp.y===eps[ei].y){hasGnd=true;break;}
-            }
-            if(hasGnd)break;
-          }
-          if(hasGnd)break;
+          if(nw&&nw.net){netName=nw.net;break;}
         }
-        if(hasGnd){
-          netName='0';
-        } else {
-          netName='n'+String(tempNetCounterGen).padStart(3,'0');
-          tempNetCounterGen++;
-        }
+      }
+      if(!netName){
+        netName='n'+String(tempNetCounterGen).padStart(3,'0');
+        tempNetCounterGen++;
       }
       for(var nij=0;nij<netIds.length;nij++){
         processedWires[netIds[nij]]=true;
@@ -180,7 +208,7 @@ function buildSpiceRefMap(){
 
 // Candidate ngspice vector names for the current flowing INTO a given pin, plus
 // the sign that converts the device vector into that terminal current.
-// Device currents come from `.options savecurrents` (@dev[i], @dev[ic], …);
+// Device currents come from the generated `.save` list (@dev[i], @dev[ic], …);
 // voltage-source branch currents are saved by ngspice anyway (i(v1)).
 // Several candidates are returned because the exact parameter name differs
 // between device types and ngspice versions — the plotter takes the first one
@@ -245,6 +273,42 @@ function zenerModelCard(name,c){
   return '.model '+name+' D(IS=1e-14 N=1.6 RS='+rs+' CJO=100p BV='+bv+' IBV='+iz+')';
 }
 
+// Parses SPICE-style engineering-notation numbers ("1m", "4.7k", "0.001", …)
+// into a plain JS number. Trailing unit letters (e.g. "1mOhm"/"1mΩ") are
+// tolerated since only the recognised SI-prefix character right after the
+// digits is consumed.
+function parseEngNumber(str){
+  var m=String(str||'').trim().match(/^([+-]?\d*\.?\d+(?:e[+-]?\d+)?)\s*(meg|[tgkmunpµ])?/i);
+  if(!m)return NaN;
+  var mult={t:1e12,g:1e9,meg:1e6,k:1e3,m:1e-3,u:1e-6,'µ':1e-6,n:1e-9,p:1e-12}[(m[2]||'').toLowerCase()]||1;
+  return parseFloat(m[1])*mult;
+}
+
+// MOSFET: an approximate per-instance VDMOS card, sized from the Rds(on) the
+// user enters in the properties panel. In the VDMOS channel's linear region
+// (Vds→0) the resistance is 1/(KP·(Vgs−Vto)) with THETA-mobility degradation
+// folded in — see the ngspice VDMOS model (based on MOS1). Solving that for KP
+// against a fixed logic-level reference point (Vgs=5V, against the VTO=±4V /
+// THETA=0.1 used everywhere else in this default model, i.e. a 1V overdrive)
+// gives the KP that lands Rds(on) on target at that one operating point; RD/RS
+// take a small (1%) slice each as a token series/parasitic split. This is a
+// rough single-point fit ("grob"), not a real datasheet curve fit.
+function mosModelCard(name,c,chan){
+  var vto=(chan==='PCHAN')?-4.0:4.0;
+  var theta=0.1;
+  var vgsRef=5;
+  var overdrive=vgsRef-Math.abs(vto);   // 1V with the fixed VTO above
+  var target=parseEngNumber(c.rdson);
+  if(!(target>0))target=1e-3;           // default: 1 mΩ
+  var rd=Math.max(target*0.01,1e-5);
+  var rs=rd;
+  var rchan=Math.max(target-rd-rs,1e-6);
+  var kp=(1+theta*overdrive)/(rchan*overdrive);
+  return '.model '+name+' VDMOS ( '+chan+' VTO='+vto+' KP='+kp.toPrecision(6)+
+    ' LAMBDA=0.02 RDS=1e7 RD='+rd.toExponential(3)+' RS='+rs.toExponential(3)+
+    ' RG=2 IS=1e-12 N=1.2 BV=100 IBV=1e-3 CGS=1.5e-9 CGDMAX=0.8e-9 CGDMIN=0.08e-9 CJO=0.6e-9 THETA='+theta+' )';
+}
+
 // Thyristor: behavioural latch model. A plain two-transistor macro model cannot
 // hold off (its loop gain a_npn + a_pnp is > 1 at any current, so it self-fires
 // at a few mA), therefore the latch state is kept explicitly: it sets when the
@@ -302,11 +366,72 @@ function pwmGenSubckt(name,c){
   ];
 }
 
+// ═══ MODEL SELECTION ═══
+// Symbols carry a part number for documentation (2N2222, 1N4148, RED …), but a
+// part number is not a SPICE model. Unless the user actually supplied a
+// `.model`/`.subckt` card of that name in the directives box, the device falls
+// back to the built-in default model, so a freshly placed part always simulates.
+function userDefinedModels(){
+  var names={};
+  var el=document.getElementById('sim-directives');
+  var txt=el?(el.value||''):'';
+  var re=/^[\t ]*\.(model|subckt)[\t ]+([^\s(]+)/gim,m;
+  while((m=re.exec(txt)))names[m[2].toLowerCase()]=true;
+  return names;
+}
+
+function pickModel(part,fallback,userModels,notes,ref){
+  var p=String(part||'').trim();
+  if(!p)return fallback;
+  if(userModels[p.toLowerCase()])return p;
+  if(notes&&!notes.seen[p.toLowerCase()]){
+    notes.seen[p.toLowerCase()]=true;
+    notes.lines.push('* note: no .model/.subckt named "'+p+'" ('+ref+') — using '+fallback);
+  }
+  return fallback;
+}
+
+// ═══ SAVE LIST FOR DEVICE CURRENTS ═══
+// `.options savecurrents` cannot be used: it blindly asks for every terminal of
+// every device, including `@m1[ib]` on a VDMOS, which has no bulk terminal. The
+// missing vector makes ngspice abort the whole raw output ("no writable vector
+// found") and this WASM build then never returns at all. So the save list is
+// built from the schematic instead — only terminals that actually exist.
+// `all` covers the node voltages plus the branch currents of every voltage and
+// behavioural source, including the ones inside our subcircuits.
+function buildSaveVectors(){
+  var refMap=buildSpiceRefMap();
+  var out=[];
+  for(var i=0;i<S.components.length;i++){
+    var c=S.components[i],t=c.type,ref=refMap[c.id];
+    if(!ref)continue;
+    if(t==='resistor'||t==='capacitor'||t==='inductor'||t==='sw'){out.push('@'+ref+'[i]');continue;}
+    if(t==='diode'||t==='led'||t==='zener'){out.push('@'+ref+'[id]');continue;}
+    if(t==='npn'||t==='pnp'){out.push('@'+ref+'[ic]','@'+ref+'[ib]','@'+ref+'[ie]');continue;}
+    // VDMOS is a three-terminal device here — no [ib]!
+    if(t==='nmos'||t==='pmos'){out.push('@'+ref+'[id]','@'+ref+'[ig]','@'+ref+'[is]');continue;}
+    if(t==='source'||t==='vcc'){
+      var first=ref.charAt(0).toUpperCase();
+      out.push((first==='I'||first==='G')?('@'+ref+'[i]'):('i('+ref+')'));
+      continue;
+    }
+    // scr / pwmgen / custom subcircuits: their internal sources are covered by `all`
+  }
+  return out;
+}
+
+function buildSaveLine(){
+  var v=buildSaveVectors();
+  return '.save all'+(v.length?' '+v.join(' '):'');
+}
+
 function generateNetlist(){
   tempNetNamesGen={};
   tempNetCounterGen=0;
   getTempNetName(S.wires.length>0?S.wires[0].id:null);
   var refMap=buildSpiceRefMap();
+  var userModels=userDefinedModels();
+  var modelNotes={seen:{},lines:[]};
   var lines=[];
   var subcircuits=[];
   var passive=['resistor','capacitor','inductor'];
@@ -314,6 +439,7 @@ function generateNetlist(){
   var zenerModels=[];   // per-instance .model cards for Z-diodes
   var pwmSubs=[];       // per-instance PWM generator subcircuits
   var scrSubs=[];       // per-instance thyristor subcircuits
+  var mosModels=[];     // per-instance .model cards for MOSFETs (sized from Rds(on))
   // Determine which component classes are actually present, so we only emit
   // the default .model card for classes that have at least one instance.
   var present={};
@@ -324,8 +450,10 @@ function generateNetlist(){
   if(present.diode||present.led)lines.push('.model defaultdiode D');
   if(present.npn)lines.push('.model npn_default NPN ( IS=1e-14 BF=200 NF=1 VAF=100 IKF=0.3 ISE=1e-13 NE=1.5 BR=5 NR=1 VAR=20 IKR=0.1 ISC=1e-13 NC=2 RE=0.5 RC=0.5 RB=10 CJE=2e-12 VJE=0.75 MJE=0.33 CJC=1e-12 VJC=0.6 MJC=0.33 TF=0.5e-9 TR=50e-9 XTB=1.5 EG=1.11 XTI=3 KF=1e-15 AF=1 )');
   if(present.pnp)lines.push('.model pnp_default PNP ( IS=1e-14 BF=150 NF=1 VAF=80 IKF=0.2 ISE=1e-13 NE=1.5 BR=3 NR=1 VAR=15 IKR=0.08 ISC=1e-13 NC=2 RE=0.6 RC=0.6 RB=12 CJE=2.5e-12 VJE=0.75 MJE=0.33 CJC=1.2e-12 VJC=0.6 MJC=0.33 TF=0.6e-9 TR=60e-9 XTB=1.5 EG=1.11 XTI=3 KF=1e-15 AF=1 )');
-  if(present.nmos)lines.push('.model mos_n_default VDMOS ( VTO=4.0 KP=8 LAMBDA=0.02 RDS=0.08 RD=0.02 RS=0.02 RG=2 IS=1e-12 N=1.2 BV=100 IBV=1e-3 CGS=1.5e-9 CGD=0.8e-9 CBD=0.6e-9 TOX=1e-7 UO=600 VMAX=1e5 THETA=0.1 TCV=0.003 )');
-  if(present.pmos)lines.push('.model mos_p_default VDMOS ( VTO=-4.0 KP=8 LAMBDA=0.02 RDS=0.08 RD=0.02 RS=0.02 RG=2 IS=1e-12 N=1.2 BV=100 IBV=1e-3 CGS=1.5e-9 CGD=0.8e-9 CBD=0.6e-9 TOX=1e-7 UO=600 VMAX=1e5 THETA=0.1 TCV=0.003 )');
+  // NOTE: ngspice's VDMOS is a dedicated power-MOSFET level, NOT the generic
+  // MOS1/2/3 model - it has its own parameter set. See mosModelCard() below
+  // for how each nmos/pmos instance's own .model card is now built (from its
+  // Rds(on) property) - there is no shared default card left to emit here.
   lines.push('');
 
   for(var ci=0;ci<S.components.length;ci++){
@@ -385,7 +513,7 @@ function generateNetlist(){
     if(c.type==='gnd')continue;
     if(c.type==='sw'){
       var ref=refMap[c.id];
-      var model=c.model||'defaultswitch';
+      var model=pickModel(c.model,'defaultswitch',userModels,modelNotes,ref);
       var nets=[];
       for(var pi=0;pi<def.pins.length;pi++){
         var tp=xfPin(def.pins[pi].x,def.pins[pi].y,c.rot||0,c.mirror||false);
@@ -399,7 +527,7 @@ function generateNetlist(){
     }
     if(c.type==='npn'||c.type==='pnp'){
       var ref=refMap[c.id];
-      var model=c.value||(c.type==='npn'?'npn_default':'pnp_default');
+      var model=pickModel(c.value,c.type==='npn'?'npn_default':'pnp_default',userModels,modelNotes,ref);
       var nets=[];
       for(var pi=0;pi<def.pins.length;pi++){
         var tp=xfPin(def.pins[pi].x,def.pins[pi].y,c.rot||0,c.mirror||false);
@@ -413,7 +541,18 @@ function generateNetlist(){
     }
     if(c.type==='nmos'||c.type==='pmos'){
       var ref=refMap[c.id];
-      var model=c.value||(c.type==='nmos'?'mos_n_default':'mos_p_default');
+      var chan=c.type==='nmos'?'NCHAN':'PCHAN';
+      // A "Part" name that matches a user-supplied .model/.subckt (typed into
+      // the directives box) still wins, same as before. Otherwise each
+      // instance gets its own auto-sized model card from its Rds(on) field.
+      var partName=String(c.value||'').trim();
+      var model;
+      if(partName&&userModels[partName.toLowerCase()]){
+        model=partName;
+      }else{
+        model='mos_'+ref.toLowerCase();
+        mosModels.push(mosModelCard(model,c,chan));
+      }
       var nets=[];
       for(var pi=0;pi<def.pins.length;pi++){
         var tp=xfPin(def.pins[pi].x,def.pins[pi].y,c.rot||0,c.mirror||false);
@@ -470,7 +609,7 @@ function generateNetlist(){
     }
     if(c.type==='diode'||c.type==='led'){
       var ref=refMap[c.id];
-      var model=c.value||'defaultdiode';
+      var model=pickModel(c.value,'defaultdiode',userModels,modelNotes,ref);
       var nets=[];
       for(var pi=0;pi<def.pins.length;pi++){
         var tp=xfPin(def.pins[pi].x,def.pins[pi].y,c.rot||0,c.mirror||false);
@@ -510,10 +649,19 @@ function generateNetlist(){
     lines.push(line);
   }
 
+  if(modelNotes.lines.length){
+    lines.push('');
+    for(var mn=0;mn<modelNotes.lines.length;mn++)lines.push(modelNotes.lines[mn]);
+  }
   if(zenerModels.length){
     lines.push('');
     lines.push('* Z-diode models');
     for(var zi=0;zi<zenerModels.length;zi++)lines.push(zenerModels[zi]);
+  }
+  if(mosModels.length){
+    lines.push('');
+    lines.push('* MOSFET models (auto-sized from Rds(on))');
+    for(var mi2=0;mi2<mosModels.length;mi2++)lines.push(mosModels[mi2]);
   }
   for(var si2=0;si2<scrSubs.length;si2++){
     lines.push('');
