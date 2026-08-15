@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════
-// SCHEMATIC FORGE  v2  —  Application Logic
+// TURMERICLAB  v2  —  Application Logic
 // ═══════════════════════════════════════════════════
 /* GRID and schematic core moved to js/schematic.js */
 const svg=document.getElementById('schematic-svg');
@@ -1741,7 +1741,7 @@ function importSVG(){
       var doc=parser.parseFromString(ev.target.result,'image/svg+xml');
       var desc=doc.getElementById('schematic-data');
       if(!desc){
-        alert('This SVG has no embedded schematic data.\nOnly SVGs exported from SchematicForge can be imported.');
+        alert('This SVG has no embedded schematic data.\nOnly SVGs exported from TurmericLab can be imported.');
         return;
       }
         try{
