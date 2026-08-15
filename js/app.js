@@ -330,13 +330,15 @@ function renderProps(){
     }
   }
   // properties apply immediately on change — no Apply button
-  html+='<div class="props-sect">Pins</div>';
-  for(var pidx=0;pidx<def.pins.length;pidx++){
-    var pin=def.pins[pidx];
-    var tpp=xfPin(pin.x,pin.y,comp.rot||0,comp.mirror||false);
-    const ax=comp.x+tpp.x,ay=comp.y+tpp.y;
-    const cnt=S.wires.filter(function(w){const f=w.points[0],l=w.points[w.points.length-1];return(f.x===ax&&f.y===ay)||(l.x===ax&&l.y===ay);}).length;
-    html+='<div class="pin-row"><span class="pin-name">'+pin.n+'</span><span class="pin-net">'+(cnt?cnt+' wire(s)':'unconnected')+'</span></div>';
+  if(def.pins.length){
+    html+='<div class="props-sect">Pins</div>';
+    for(var pidx=0;pidx<def.pins.length;pidx++){
+      var pin=def.pins[pidx];
+      var tpp=xfPin(pin.x,pin.y,comp.rot||0,comp.mirror||false);
+      const ax=comp.x+tpp.x,ay=comp.y+tpp.y;
+      const cnt=S.wires.filter(function(w){const f=w.points[0],l=w.points[w.points.length-1];return(f.x===ax&&f.y===ay)||(l.x===ax&&l.y===ay);}).length;
+      html+='<div class="pin-row"><span class="pin-name">'+pin.n+'</span><span class="pin-net">'+(cnt?cnt+' wire(s)':'unconnected')+'</span></div>';
+    }
   }
   pc.innerHTML=html;
   // attach live listeners: text inputs

@@ -79,6 +79,9 @@ body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);displ
 .component-group .comp-pin{stroke:var(--comp-stroke);stroke-width:1.5;fill:none;}
 .component-group .comp-label{fill:var(--text-mid);font-family:'Share Tech Mono',monospace;font-size:18px;}
 .component-group .comp-value{fill:var(--accent);font-family:'Share Tech Mono',monospace;font-size:16px;}
+/* Directive-only components (no real device, no net) get a dashed body so
+   they read as "not a physical part" at a glance. */
+.component-group .param-body{stroke-dasharray:5 3;}
 .component-group .pin-dot{fill:var(--comp-stroke);}
 .component-group .hit-rect{fill:transparent;stroke:none;}
 

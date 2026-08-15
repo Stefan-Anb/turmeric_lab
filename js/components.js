@@ -426,5 +426,22 @@ const CD={
       var t=TA(g,40,0,nm,'comp-label');
       t.style.fill='#00c8ff';t.style.fontSize='18px';t.style.fontWeight='bold';
     }
+  },
+  // A pure directive, not a real device: no pins, no net, contributes a single
+  // ".param name=value" line to the netlist (see generateNetlist()). Any other
+  // component's value field can then reference it as "{name}" — SPICE resolves
+  // that expansion itself, nothing extra is needed on this end. Dashed body
+  // marks it visually as "not a physical part" like gnd/vcc/netconn are.
+  param:{
+    lbl:'PARAM',val:'1',hitW:120,hitH:50,
+    props:{label:{l:'Parameter name'},value:{l:'Value',def:'1'}},
+    pins:[],
+    draw(g,v){
+      var name=(v.label||'PARAM').trim();
+      var val=(v.value!=null&&v.value!=='')?v.value:'0';
+      R(g,-55,-20,110,40,'comp-body param-body');
+      T(g,0,-27,'.PARAM','comp-label');
+      TA(g,0,4,name+' = '+val,'comp-value');
+    }
   }
 };
