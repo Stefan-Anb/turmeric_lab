@@ -12,3 +12,4 @@
 
 * Step Parameter, Multisimulation, Graphenschar im Plot, Auswahl einzelner Graphen, Berechnung von Kennlinien aus Multisimulation
 * alle Platzhalter entfernen oder setzen -> kann verwirren
+* Default range vom PWM-Generator auf 1V
