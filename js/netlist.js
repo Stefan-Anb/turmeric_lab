@@ -686,13 +686,36 @@ function generateNetlist(){
     }
     if(c.type.indexOf('custom_')===0){
       var ref=refMap[c.id];
-      var subname=def._name||def.lbl||c.type;
-      var nets=[];
-      for(var pi=0;pi<def.pins.length;pi++){
-        var tp=xfPin(def.pins[pi].x,def.pins[pi].y,c.rot||0,c.mirror||false);
-        var px=c.x+tp.x,py=c.y+tp.y;
-        var netName=getNetNameWithTempNames(px,py);
-        nets.push(netName);
+      var subname=customSubcktName(def)||c.type;
+      // Port order normally follows def.pins (left column then right column),
+      // which is purely cosmetic and freely reorderable in the editor. If a
+      // model with a parsed ".subckt NAME p1 p2 ..." header is attached,
+      // prefer ITS port order instead (looked up by pin name) so dragging
+      // pins around for layout can never desync the positional X-line from
+      // the actual subcircuit definition.
+      var parsedModel=def._model?parseSubcktHeader(def._model):null;
+      // Blank pin rows (deliberate visual gaps, see the pin editor) never
+      // correspond to a subcircuit port, so compare against the NAMED pin
+      // count only — otherwise a schematic-side spacer row would always
+      // defeat this match and silently fall back to visual layout order.
+      var namedPinCount=def.pins.filter(function(p){return (p.n||'').trim();}).length;
+      var nets=null;
+      if(parsedModel&&parsedModel.pins.length===namedPinCount){
+        nets=[];
+        for(var pn=0;pn<parsedModel.pins.length;pn++){
+          var pinIdx=def.pins.findIndex(function(p){return (p.n||'').trim()===parsedModel.pins[pn];});
+          if(pinIdx<0){nets=null;break;}
+          var tpp=xfPin(def.pins[pinIdx].x,def.pins[pinIdx].y,c.rot||0,c.mirror||false);
+          nets.push(getNetNameWithTempNames(c.x+tpp.x,c.y+tpp.y));
+        }
+      }
+      if(!nets){
+        nets=[];
+        for(var pi=0;pi<def.pins.length;pi++){
+          var tp=xfPin(def.pins[pi].x,def.pins[pi].y,c.rot||0,c.mirror||false);
+          var px=c.x+tp.x,py=c.y+tp.y;
+          nets.push(getNetNameWithTempNames(px,py));
+        }
       }
       var line=ref+' '+nets.join(' ')+' '+subname;
       lines.push(line);
@@ -742,13 +765,17 @@ function generateNetlist(){
     if(processedSubcircuits[c.type])continue;
     processedSubcircuits[c.type]=true;
     var def=CD[c.type];
-    var subname=def._name||def.lbl||c.type;
-    var pinList=def.pins.map(function(p){return p.n;}).join(' ');
+    var subname=customSubcktName(def)||c.type;
     lines.push('');
     lines.push('* Subcircuit: '+subname);
-    lines.push('.subckt '+subname+' '+pinList);
-    lines.push('* (subcircuit definition not implemented - user must provide)');
-    lines.push('.ends '+subname);
+    if(def._model&&def._model.trim()){
+      lines.push(def._model.trim());
+    } else {
+      var pinList=def.pins.map(function(p){return p.n;}).join(' ');
+      lines.push('.subckt '+subname+' '+pinList);
+      lines.push('* (subcircuit definition not implemented - user must provide)');
+      lines.push('.ends '+subname);
+    }
   }
 
   return lines.join('\n');

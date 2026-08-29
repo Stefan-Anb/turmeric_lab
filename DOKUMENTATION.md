@@ -922,6 +922,101 @@ da sie beispielhaft für den Umgang mit SVG-Text, Formularfeldern und
 
 ---
 
+## 8. Custom Components: Bibliothek, Editor, Modell-Import und Pin-Relinking
+
+### 8.1 Zwei Registries statt einer: `libraryComponents` vs. `customComponents`
+
+Custom-Component-Definitionen (`js/components.js`) leben in zwei getrennten
+Objekten:
+
+- `customComponents` — **Schematic-inline**. Genau das, was mit dem aktuellen
+  Schematic gespeichert wird (`saveSchematic()`/`loadSchematic()`, seit dieser
+  Änderung auch `exportSVG()`/`importSVG()`) und beim Laden eines anderen
+  Schematics vollständig ersetzt wird — beabsichtigt, ein Dokument bringt
+  seine eigenen Kopien mit.
+- `libraryComponents` — **persistent, schematic-unabhängig**, eigener
+  localStorage-Key `schematic_library`. Wird von `loadSchematic()`,
+  `importSVG()` und `clearAll()` nie berührt und beim Start zusätzlich aus
+  `lib/default_components.json` geseedet (`seedLibraryFromDefaults()`, nur
+  fehlende Keys, damit eigene Bibliotheks-Änderungen erhalten bleiben).
+
+`CD` (die von Rendering/Platzierung/Netzliste genutzte flache Laufzeit-Dict)
+wird von `mergeCustomComponents()` aus beiden Registries gebaut, Bibliothek
+zuerst, inline danach — inline gewinnt bei Namenskollision. Das ist der
+eigentliche Fix für den ursprünglichen Ladekonflikt: vorher gab es nur eine
+einzige `customComponents`-Registry, die `loadSchematic()`/`importSVG()`
+komplett ersetzten — jede geladene Definition (egal ob absichtlich divergiert
+oder zufällig gleichnamig) überschrieb faktisch, was zuvor als "die" Definition
+dieses Keys galt. Mit der Trennung gibt es keine gemeinsame, überschreibbare
+globale Registry mehr: ein geladenes Schematic rendert/simuliert immer mit
+seiner eigenen eingebetteten Kopie, unabhängig vom aktuellen Bibliotheksstand.
+Bibliothek und Inline-Kopie dürfen bewusst divergieren; der Abgleich passiert
+nur explizit über "Update from Library" (8.3).
+
+Beim ersten tatsächlichen Platzieren eines Bibliotheks-Bauteils
+(`placeComp()`) wird sofort eine inline Kopie angelegt (`_libraryKey` verweist
+zurück auf den Bibliotheks-Key) — jedes im Schematic verwendete Bauteil ist
+dadurch von Anfang an self-contained/exportierbar.
+
+### 8.2 `createCustomCompDef` als reiner Builder
+
+`createCustomCompDef(providedKey,config)` baut nur noch `{key,def}` und
+schreibt nirgends selbst in eine Registry — Aufrufer entscheiden explizit
+(`customComponents[key]=…` oder `libraryComponents[key]=…`). Die Umkehrung,
+`extractCustomCompConfig(def)`, liest eine bestehende Definition zurück in das
+Editor-Konfigurationsformat; beide zusammen tragen den Editor selbst, das
+Klonen, "Save to Library" und "Update from Library" — jeder dieser Wege ist
+im Kern nur `extractCustomCompConfig` → (Werte anpassen) → `createCustomCompDef`
+→ Zielregistry zuweisen.
+
+### 8.3 Pin-Relinking: Namens- statt Indexmatching
+
+Leiterbahnen referenzieren einen Pin über `{compId,pinIdx}`. `rewireComp()`
+(Rotation/Spiegelung) vertraut `pinIdx` blind, weil sich dabei nur die
+Position, nie Identität oder Reihenfolge der Pins ändert. Eine
+Custom-Component-Bearbeitung (oder "Update from Library") kann Pins aber
+hinzufügen, entfernen oder umsortieren — ein unverändert gebliebener `pinIdx`
+würde beim nächsten Verschieben (`moveComp`) oder Rotieren stillschweigend auf
+einen falschen oder gar nicht mehr existierenden Pin zeigen, während die
+Wire-Geometrie unverändert an ihrer alten Position hängen bleibt.
+
+`relinkCustomCompPins(typeKey, oldPins)` (js/schematic.js) löst das per
+Namens-Matching zwischen dem alten Pin-Array (Snapshot vor der Änderung) und
+dem gerade installierten `CD[typeKey].pins`: gleicher Name, verschobener Index
+→ `pinIdx` aktualisieren und Wire-Ende per `rerouteEnd`/`compPinPos` an die
+neue Position ziehen; Name nicht mehr vorhanden → Verbindung lösen
+(`w.from`/`w.to = null`, die Wire bleibt geometrisch liegen, gilt aber nicht
+mehr als angeschlossen). Wird für **jede** platzierte Instanz des betroffenen
+Typs aufgerufen (eine Definition kann mehrfach verwendet werden) — sowohl aus
+`commitCustomCompEdit()` als auch aus `updateComponentFromLibrary()`.
+
+### 8.4 Modell-Import: Parsing und Netzlisten-Emission
+
+`parseSubcktHeader(text)` (js/components.js) findet die erste
+`.subckt NAME p1 p2 …`-Zeile (inkl. `+`-Fortsetzungszeilen), bricht die
+Pin-Liste an `PARAMS:`/dem ersten `key=value`-Token ab. Der Component-Editor
+ruft das beim Verlassen des Modell-Textfelds (`syncCustomPinsFromModel()`) auf
+und ersetzt bei einem Treffer die Pin-Listen (erste Hälfte links, Rest rechts,
+Header-Reihenfolge erhalten) — bewusst nur bei Blur, nicht bei jedem
+Tastendruck, damit ein späteres manuelles Umbenennen von Pins nicht bei jeder
+weiteren Modell-Textänderung wieder überschrieben wird.
+
+In der Netzliste (`js/netlist.js`) wird ein nicht-leeres `def._model`
+unverändert als Subcircuit-Definition emittiert (statt des bisherigen
+"not implemented"-Stubs), und der X-Instanzzeilen-Name (`customSubcktName`)
+bevorzugt den im Modell-Header deklarierten Namen. Wichtiger:  die
+**Portreihenfolge** der Instanzzeile folgt, wenn ein passendes Modell mit
+gleicher Pin-Anzahl vorliegt, der **Header-Reihenfolge** (Pins werden per Name
+in `def.pins` nachgeschlagen) statt der visuellen Links/Rechts-Array-Reihenfolge.
+Das ist eine bewusste Entkopplung: der neue Drag&Drop-Pin-Editor (siehe
+Properties-Panel) erlaubt rein kosmetisches Umsortieren der Pins für die
+Symbol-Optik; ohne diese Entkopplung würde ein solches Umsortieren die
+SPICE-Subcircuit-Aufrufreihenfolge (rein positional) unbemerkt verfälschen.
+Ohne passendes Modell (oder bei Pin-Anzahl-Mismatch) bleibt der Fallback über
+`def.pins`-Reihenfolge erhalten.
+
+---
+
 ## Quellen (NGSpice / WASM)
 
 - Ngspice User's Manual v46 (HTML): <https://ngspice.sourceforge.io/docs/ngspice-html-manual/manual.xhtml>

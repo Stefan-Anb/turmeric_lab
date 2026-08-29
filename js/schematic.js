@@ -180,3 +180,47 @@ function rewireComp(comp,def,oldRot,oldMir){
     var j=juncAt(oldX,oldY);if(j){j.x=newX;j.y=newY;}
   }
 }
+
+// Called after a custom component's pin list changes (added/removed/
+// reordered pins — via the editor or "Update from Library"). Wires reference
+// a pin by {compId,pinIdx}; rewireComp above trusts pinIdx blindly because
+// rotate/mirror never change pin identity or order, only position. A pin-
+// config edit can, though — reordering or removing pins means a stale pinIdx
+// would silently snap to whatever pin now happens to occupy that index next
+// time the component moves. So this matches by pin NAME between oldPins (the
+// pin list before the edit) and the just-installed CD[typeKey].pins instead:
+// same name -> follow it to its new index and reroute the wire there; name no
+// longer present -> drop the connection (the wire stays put, now floating)
+// rather than mis-attaching to the wrong pin.
+function relinkCustomCompPins(typeKey,oldPins){
+  var newDef=CD[typeKey];
+  if(!newDef||!oldPins)return;
+  var newIdxByName={};
+  for(var i=0;i<newDef.pins.length;i++){
+    var nm=(newDef.pins[i].n||'').trim();
+    if(nm && !(nm in newIdxByName))newIdxByName[nm]=i;
+  }
+  var affectedIds={};
+  for(var ci=0;ci<S.components.length;ci++)if(S.components[ci].type===typeKey)affectedIds[S.components[ci].id]=true;
+  if(!Object.keys(affectedIds).length)return;
+  for(var wi=0;wi<S.wires.length;wi++){
+    var w=S.wires[wi];
+    var ends=['from','to'];
+    for(var ei=0;ei<ends.length;ei++){
+      var end=ends[ei];
+      var conn=w[end];
+      if(!conn||conn.type!=='pin'||!affectedIds[conn.compId])continue;
+      var oldPin=oldPins[conn.pinIdx];
+      var nm=oldPin?(oldPin.n||'').trim():'';
+      var newIdx=nm?newIdxByName[nm]:undefined;
+      if(newIdx===undefined){
+        w[end]=null;
+      } else if(newIdx!==conn.pinIdx){
+        var c=S.components.find(function(cc){return cc.id===conn.compId;});
+        var pos=compPinPos(c,newIdx);
+        conn.pinIdx=newIdx;
+        rerouteEnd(w,end,pos.x,pos.y);
+      }
+    }
+  }
+}

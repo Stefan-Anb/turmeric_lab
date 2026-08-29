@@ -27,15 +27,15 @@
   </button>
   <div class="tb-sep"></div>
   <button class="tb-btn" onclick="clearAll()">CLEAR</button>
-  <button class="tb-btn" onclick="showCustomCompPanel()">CUSTOM</button>
   <button class="tb-btn" onclick="exportSVG()">SAVE</button>
   <button class="tb-btn" onclick="importSVG()">LOAD</button>
-  <button class="tb-btn" onclick="showNetlist()">NETLIST</button>
+  <div class="tb-sep"></div>
   <button class="tb-btn" onclick="zoomToFit()">
     <svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 4V1h3M8 1h3v3M11 8v3H8M4 11H1V8" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>ZOOM FIT
   </button>
   <div class="mode-indicator">MODE: <span id="mode-label">SELECT</span></div>
   <div class="tb-sim-group">
+    <button class="tb-btn" onclick="showNetlist()">NETLIST</button>
     <span id="sim-status" class="sim-status-compact" title="Idle.">Idle.</span>
     <button id="sim-run-btn" class="tb-btn tb-btn-run state-ready" title="Run the simulation"><span id="sim-run-icon" class="tb-run-icon">▶</span><span id="sim-run-label">RUN</span></button>
     <button class="tb-btn tb-btn-sim" id="btn-sim" onclick="simulateButtonClick()">SIMULATION</button>
@@ -106,6 +106,10 @@
     <button class="comp-btn" draggable="true" data-comp="param" onclick="selectComp('param',event)">
       <svg class="comp-prev" viewBox="-24 -13 48 26"><rect x="-22" y="-9" width="44" height="18" stroke="#a8c4d8" stroke-width="1.5" stroke-dasharray="4 3" fill="#0f1215"/><text x="0" y="-1" font-size="6.5" fill="#a8c4d8" font-family="monospace" text-anchor="middle">.PARAM</text><text x="0" y="8" font-size="7" fill="#00c8ff" font-family="monospace" font-weight="bold" text-anchor="middle">X=1</text></svg>Parameter
     </button>
+    <div class="grp-lbl-row">
+      <span class="grp-lbl-text">Misc. Components</span>
+      <button class="grp-lbl-gear" title="Configure components" onclick="showCustomCompPanel()">⚙</button>
+    </div>
     <div id="sidebar-custom-comps"></div>
     <div class="grp-lbl">Annotations</div>
     <button class="comp-btn" draggable="true" data-comp="blanket" onclick="selectComp('blanket',event)">
@@ -162,7 +166,10 @@
     <div class="props-header">Properties</div>
     <div id="props-content"><div class="props-empty">Select a component<br>to edit its properties</div></div>
 <div id="custom-comp-section" style="display:none">
-      <div class="props-header" style="border-top:1px solid var(--border);margin-top:12px;padding-top:12px">Custom Components</div>
+      <div class="props-header cc-section-header" style="border-top:1px solid var(--border);margin-top:12px;padding-top:12px">
+        Misc. Components
+        <button class="modal-close" onclick="hideCustomCompPanel()" title="Close">&times;</button>
+      </div>
       <div class="cc-select-all-row">
         <button class="tb-btn" onclick="newCustomComp()" style="font-size:10px;padding:2px 6px;margin-right:4px">New</button>
         <button class="tb-btn" onclick="importCustomComp()" style="font-size:10px;padding:2px 6px;margin-right:4px">Import</button>
@@ -175,24 +182,28 @@
       <div id="custom-comp-edit" style="display:none">
         <div class="props-sect">Edit Component</div>
         <div class="prop-row"><div class="prop-lbl">Component Name</div>
-          <input class="prop-input" id="cc-name" type="text" placeholder="Custom"/></div>
+          <input class="prop-input" id="cc-name" type="text" placeholder="Custom" onchange="commitCustomCompEdit()"/>
+          <div id="cc-name-warn" class="cc-inline-warn" style="display:none">Name already used by another component &mdash; keeping the current key until it's unique.</div></div>
         <div class="prop-row"><div class="prop-lbl">Part Prefix</div>
-          <input class="prop-input" id="cc-prefix" type="text" placeholder="U" style="width:60px"/></div>
-        <div class="prop-row"><div class="prop-lbl">Left Pins</div>
-          <div id="cc-left-pins"></div>
-          <button class="tb-btn" onclick="addCustomPin('left')" style="margin-top:4px;font-size:10px;padding:4px 8px">+ Add</button></div>
-        <div class="prop-row"><div class="prop-lbl">Right Pins</div>
-          <div id="cc-right-pins"></div>
-          <button class="tb-btn" onclick="addCustomPin('right')" style="margin-top:4px;font-size:10px;padding:4px 8px">+ Add</button></div>
+          <input class="prop-input" id="cc-prefix" type="text" placeholder="U" style="width:60px" onchange="commitCustomCompEdit()"/></div>
+        <div class="prop-row">
+          <div class="prop-lbl">Pins</div>
+          <div id="cc-pins-cols" class="cc-pins-cols">
+            <div class="cc-pins-col"><div class="cc-pins-col-hdr">Left</div><div id="cc-left-pins" class="cc-pin-list"></div></div>
+            <div class="cc-pins-col"><div class="cc-pins-col-hdr">Right</div><div id="cc-right-pins" class="cc-pin-list"></div></div>
+          </div>
+          <div id="cc-pins-warn" class="cc-inline-warn" style="display:none">Add at least one pin.</div>
+        </div>
         <div class="prop-row"><div class="prop-lbl">Description</div>
-          <input class="prop-input" id="cc-desc" type="text" placeholder="Description"/></div>
-        <div class="prop-row"><div class="prop-lbl">Model</div>
-          <input class="prop-input" id="cc-model" type="text" placeholder="Model"/></div>
+          <input class="prop-input" id="cc-desc" type="text" placeholder="Description" oninput="commitCustomCompEdit()"/></div>
+        <div class="prop-row"><div class="prop-lbl">Model <span style="font-weight:400;color:var(--text-lo)">(SPICE .subckt, optional)</span></div>
+          <textarea class="prop-input" id="cc-model" rows="6" placeholder=".subckt NAME p1 p2 ...&#10;...&#10;.ends NAME" spellcheck="false" oninput="commitCustomCompEdit()" onchange="syncCustomPinsFromModel()"></textarea>
+          <button class="tb-btn" onclick="loadCustomModelFile()" style="margin-top:4px;font-size:10px;padding:4px 8px">Load file&hellip;</button></div>
         <div class="prop-row" style="flex-direction:row;gap:8px;padding-top:8px">
-          <button id="cc-create-btn" class="tb-btn" onclick="applyCustomComp()" style="flex:1">Apply</button>
+          <button class="tb-btn" onclick="cloneCustomComp(editingCustomCompKey,editingCustomCompScope)" style="flex:1" title="Create an independent copy to modify without touching this one">&#10697; Clone</button>
+          <button class="tb-btn" onclick="saveCustomCompToLibrary()" style="flex:1" title="Publish this definition to the shared component library">&#128190; Save to Library</button>
         </div>
       </div>
-      <input type="file" id="custom-import-file" accept=".json" style="display:none" onchange="handleCustomImport(event)"/>
     </div>
     <div id="sim-settings" style="display:none">
       <div class="props-header sim-settings-header">NGSpice Simulation

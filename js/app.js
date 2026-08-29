@@ -433,7 +433,15 @@ function renderProps(){
   const comp=S.components.find(function(c){return c.id===s.id;});
   if(!comp)return;
   const def=CD[comp.type];
-  let html='<div class="props-badge">'+comp.type.toUpperCase()+'</div><div class="props-sect">General</div>';
+  let html='<div class="props-badge">'+comp.type.toUpperCase()+'</div>';
+  var inlineCustomDef=customComponents[comp.type];
+  if(inlineCustomDef){
+    html+='<button class="tb-btn" style="margin:6px 12px;width:calc(100% - 24px)" onclick="editCustomComp(\''+comp.type+'\',\'inline\')">&#9881; Configure Component</button>';
+    if(inlineCustomDef._libraryKey && libraryComponents[inlineCustomDef._libraryKey]){
+      html+='<button class="tb-btn" style="margin:0 12px 6px;width:calc(100% - 24px)" onclick="updateComponentFromLibrary(\''+comp.type+'\')" title="Pull the current library version of this component into this schematic">&#8635; Update from Library</button>';
+    }
+  }
+  html+='<div class="props-sect">General</div>';
   const curMode = comp.mode || 'DC';
   for(const[key,pd]of Object.entries(def.props||{})){
     if(pd && pd.modes && !pd.modes.includes(curMode)) continue;
@@ -1203,6 +1211,16 @@ function nextRefNum(prefix){
   return max+1;
 }
 function placeComp(type,sp){
+  // First real use of a library-only part in this schematic: copy it into
+  // the inline registry (customComponents) so the schematic stays
+  // self-contained/portable, and remember where it came from (_libraryKey)
+  // so "Update from Library" can find its way back later.
+  if(libraryComponents[type] && !customComponents[type]){
+    var built=createCustomCompDef(type,extractCustomCompConfig(libraryComponents[type]));
+    built.def._libraryKey=type;
+    customComponents[type]=built.def;
+    mergeCustomComponents();
+  }
   var def=CD[type];
   var lbl=type==='netconn'?'NET':def.lbl+nextRefNum(def.lbl);
   // Annotations never rotate/mirror (see rotateSelected/mirrorSelected) — ignore
@@ -2030,6 +2048,12 @@ function exportSVG(){
   desc.setAttribute('id','schematic-data');
   var simDirEl=document.getElementById('sim-directives');
   var state={components:S.components,wires:S.wires,junctions:S.junctions,nextId:S.nextId,
+    // Inline custom-component definitions used by this schematic, so it
+    // stays self-contained on import regardless of the importing browser's
+    // local component library (see components.js: customComponents vs
+    // libraryComponents). JSON.stringify silently drops each def's `draw`
+    // function; mergeCustomComponents() rebuilds a generic one on import.
+    customComponents:customComponents,
     // Full simulation setup, including the analysis params of modes that
     // aren't currently selected, so switching modes never loses their config.
     sim:{
@@ -2070,6 +2094,12 @@ function importSVG(){
         S.nextId=state.nextId||1;
         S.probes=[];
         S.selected=[];
+        // Inline custom-component defs are this schematic's own — replace
+        // wholesale (like S.components etc. above), independent of whatever
+        // the local component library currently holds.
+        customComponents=state.customComponents||{};
+        mergeCustomComponents();
+        renderCustomCompsList();
         // Restore the simulation setup (analysis params, formulas, manual
         // directives, probes) if this SVG carries one.
         if(state.sim){
@@ -2266,201 +2296,350 @@ function hint(m){document.getElementById('sb-hint').textContent=m;}
 
 function showCustomCompPanel(){
   editingCustomCompKey=null;
+  editingCustomCompScope=null;
   document.getElementById('custom-comp-section').style.display='block';
   document.getElementById('custom-comp-edit').style.display='none';
   document.getElementById('props-content').style.display='none';
-  ccLeftPins=[''];
-  ccRightPins=[''];
-  renderCustomPinInputs('left');
-  renderCustomPinInputs('right');
-  document.getElementById('cc-name').value='';
-  document.getElementById('cc-prefix').value='U';
-  document.getElementById('cc-desc').value='';
-  document.getElementById('cc-model').value='';
+  renderCustomCompsList(); // clear any leftover highlight from a previous edit
 }
 
 function hideCustomCompPanel(){
-  document.getElementById('custom-comp-section').style.display='none';
-  document.getElementById('props-content').style.display='block';
+  // renderProps() resets custom-comp-section's display anyway and shows
+  // whatever should actually be visible (selected component, empty state, or
+  // the sim panel) — no need to duplicate that logic here.
+  renderProps();
 }
 
-function editCustomComp(key){
-  var comp=customComponents[key];
+// scope ('inline'|'library') disambiguates which definition to open when the
+// SAME key exists in both registries (e.g. a library part whose name happens
+// to collide with an unrelated local one) — both show as separate rows in
+// the management list (see renderCustomCompsList), each passing its own
+// scope here. Omit scope to fall back to the old default-preference lookup
+// (inline first) for call sites that only ever mean one specific def anyway.
+function editCustomComp(key,scope){
+  if(!scope)scope=customComponents[key]?'inline':'library';
+  var comp=scope==='library'?libraryComponents[key]:customComponents[key];
   if(!comp)return;
   editingCustomCompKey=key;
+  editingCustomCompScope=scope;
   document.getElementById('cc-name').value=comp._name||comp.lbl||'';
   document.getElementById('cc-prefix').value=comp.lbl||'U';
   document.getElementById('cc-desc').value=comp._desc||'';
   document.getElementById('cc-model').value=comp._model||'';
-  ccLeftPins=[];
-  ccRightPins=[];
-  if(comp.pins){
-    var leftCount=0,rightCount=0;
-    for(var i=0;i<comp.pins.length;i++){
-      var pin=comp.pins[i];
-      if(pin.x<0){
-        while(ccLeftPins.length<=i)ccLeftPins.push('');
-        ccLeftPins[i]=pin.n||'';
-      }else{
-        while(ccRightPins.length<=i)ccRightPins.push('');
-        ccRightPins[i]=pin.n||'';
-      }
-    }
-  }
-  if(ccLeftPins.length===0)ccLeftPins=[''];
-  if(ccRightPins.length===0)ccRightPins=[''];
+  var cfg=extractCustomCompConfig(comp);
+  ccLeftPins=cfg.leftPins;
+  ccRightPins=cfg.rightPins;
+  normalizeCustomPinArray(ccLeftPins);
+  normalizeCustomPinArray(ccRightPins);
+  setCustomCompWarn('name',false);
+  setCustomCompWarn('pins',false);
   renderCustomPinInputs('left');
   renderCustomPinInputs('right');
   document.getElementById('props-content').style.display='none';
   document.getElementById('custom-comp-section').style.display='block';
   document.getElementById('custom-comp-edit').style.display='block';
-  var btn=document.getElementById('cc-create-btn');
-  if(btn){
-    btn.textContent='Apply';
-    btn.onclick=applyCustomComp;
-  }
+  // Re-render so the list's highlight (see appendCustomCompRow) picks up
+  // editingCustomCompKey/Scope right away, not just after the first edit.
+  renderCustomCompsList();
 }
 
 // ═══ CUSTOM COMPONENT FUNCTIONS ═══
 var ccLeftPins=[];
 var ccRightPins=[];
 var editingCustomCompKey=null;
+var editingCustomCompScope=null; // 'inline' | 'library' — which registry editingCustomCompKey refers to
+
+// Keeps exactly one trailing empty pin row (the "always one more than what's
+// filled" slot you can drag a pin into to open up a gap), while leaving any
+// INTERIOR empty entries alone — those are deliberate gaps, not clutter.
+function normalizeCustomPinArray(arr){
+  while(arr.length>=2 && arr[arr.length-1]==='' && arr[arr.length-2]==='')arr.pop();
+  if(!arr.length || arr[arr.length-1]!=='')arr.push('');
+}
 
 function renderCustomPinInputs(side){
   var container=document.getElementById('cc-'+side+'-pins');
   var pins=side==='left'?ccLeftPins:ccRightPins;
   var html='';
   for(var i=0;i<pins.length;i++){
-    html+='<div class="cc-pin-row"><input type="text" placeholder="Signal name" value="'+esc(pins[i])+'" onchange="updateCustomPin(\''+side+'\','+i+',this.value)"/><button class="tb-btn cc-pin-remove" onclick="removeCustomPin(\''+side+'\','+i+')">x</button></div>';
+    var empty=!pins[i].trim();
+    html+='<div class="cc-pin-row'+(empty?' cc-pin-row-empty':'')+'" draggable="true" data-side="'+side+'" data-idx="'+i+'">'+
+      '<span class="cc-pin-drag" title="Drag to reorder">&#8942;&#8942;</span>'+
+      '<input type="text" placeholder="Pin name" value="'+esc(pins[i])+'" oninput="updateCustomPin(\''+side+'\','+i+',this.value)">'+
+      '<button class="cc-pin-trash" title="Delete pin" onclick="removeCustomPinRow(\''+side+'\','+i+')">&#128465;</button>'+
+      '</div>';
   }
   container.innerHTML=html;
+  initCustomPinDnD();
 }
 
 function updateCustomPin(side,idx,val){
-  if(side==='left')ccLeftPins[idx]=val;
-  else ccRightPins[idx]=val;
+  var arr=side==='left'?ccLeftPins:ccRightPins;
+  arr[idx]=val;
+  var lenBefore=arr.length;
+  normalizeCustomPinArray(arr);
+  if(arr.length!==lenBefore){
+    renderCustomPinInputs(side);
+    var sel=document.querySelector('.cc-pin-row[data-side="'+side+'"][data-idx="'+idx+'"] input');
+    if(sel){sel.focus();sel.setSelectionRange(sel.value.length,sel.value.length);}
+  }
+  commitCustomCompEdit();
 }
 
-function addCustomPin(side){
-  if(side==='left'){ccLeftPins.push('');renderCustomPinInputs('left');}
-  else{ccRightPins.push('');renderCustomPinInputs('right');}
+function removeCustomPinRow(side,idx){
+  var arr=side==='left'?ccLeftPins:ccRightPins;
+  arr.splice(idx,1);
+  normalizeCustomPinArray(arr);
+  renderCustomPinInputs('left');
+  renderCustomPinInputs('right');
+  commitCustomCompEdit();
 }
 
-function removeCustomPin(side,idx){
-  if(side==='left'){ccLeftPins.splice(idx,1);renderCustomPinInputs('left');}
-  else{ccRightPins.splice(idx,1);renderCustomPinInputs('right');}
+function moveCustomPin(fromSide,fromIdx,toSide,toIdx){
+  var fromArr=fromSide==='left'?ccLeftPins:ccRightPins;
+  var val=fromArr[fromIdx];
+  if(val===undefined)return;
+  fromArr.splice(fromIdx,1);
+  var toArr=toSide==='left'?ccLeftPins:ccRightPins;
+  if(fromArr===toArr && fromIdx<toIdx)toIdx--;
+  toArr.splice(toIdx,0,val);
+  normalizeCustomPinArray(ccLeftPins);
+  normalizeCustomPinArray(ccRightPins);
+  renderCustomPinInputs('left');
+  renderCustomPinInputs('right');
+  commitCustomCompEdit();
+}
+
+var ccDragSrc=null;
+function initCustomPinDnD(){
+  var root=document.getElementById('cc-pins-cols');
+  if(!root||root._dndInit)return;
+  root._dndInit=true;
+  root.addEventListener('dragstart',function(e){
+    var row=e.target.closest?e.target.closest('.cc-pin-row'):null;
+    if(!row){e.preventDefault();return;}
+    ccDragSrc={side:row.getAttribute('data-side'),idx:parseInt(row.getAttribute('data-idx'),10)};
+    if(e.dataTransfer){e.dataTransfer.effectAllowed='move';try{e.dataTransfer.setData('text/plain','pin');}catch(err){}}
+    row.classList.add('cc-pin-dragging');
+  });
+  root.addEventListener('dragend',function(e){
+    var row=e.target.closest?e.target.closest('.cc-pin-row'):null;
+    if(row)row.classList.remove('cc-pin-dragging');
+    ccDragSrc=null;
+  });
+  root.addEventListener('dragover',function(e){
+    if(!ccDragSrc)return;
+    var row=e.target.closest?e.target.closest('.cc-pin-row'):null;
+    if(!row)return;
+    e.preventDefault();
+    if(e.dataTransfer)e.dataTransfer.dropEffect='move';
+  });
+  root.addEventListener('drop',function(e){
+    if(!ccDragSrc)return;
+    var row=e.target.closest?e.target.closest('.cc-pin-row'):null;
+    if(!row)return;
+    e.preventDefault();
+    var toSide=row.getAttribute('data-side'),toIdx=parseInt(row.getAttribute('data-idx'),10);
+    var src=ccDragSrc;ccDragSrc=null;
+    moveCustomPin(src.side,src.idx,toSide,toIdx);
+  });
+}
+
+function setCustomCompWarn(which,show){
+  var el=document.getElementById('cc-'+which+'-warn');
+  if(el)el.style.display=show?'block':'none';
 }
 
 function newCustomComp(){
   var name='Custom';
-  var prefix='U';
-  var key='custom_'+name.toLowerCase();
   var cnt=1;
-  while(customComponents[key+cnt])cnt++;
-  var fullKey=key+cnt;
-  var config={
-    name:name+cnt,
-    prefix:prefix,
-    leftPins:[''],
-    rightPins:[''],
-    description:'',
-    model:''
-  };
-  createCustomCompDef(fullKey,config);
-  customComponents[fullKey]._name=name+cnt;
+  while(customComponents['custom_'+name.toLowerCase()+cnt]||libraryComponents['custom_'+name.toLowerCase()+cnt])cnt++;
+  var fullKey='custom_'+name.toLowerCase()+cnt;
+  var config={name:name+cnt,prefix:'U',leftPins:[''],rightPins:[''],description:'',model:''};
+  var built=createCustomCompDef(fullKey,config);
+  customComponents[fullKey]=built.def;
   mergeCustomComponents();
   renderCustomCompsList();
   saveSchematic();
   editCustomComp(fullKey);
 }
 
-function applyCustomComp(){
+// Live-apply handler for every field/pin edit in the custom component editor
+// (no separate Apply button — see CLAUDE.md/DOKUMENTATION.md for the
+// rationale). Always operates on editingCustomCompKey, which is set whenever
+// the editor is open (via editCustomComp()).
+function commitCustomCompEdit(){
+  var existingKey=editingCustomCompKey;
+  if(!existingKey)return;
   var name=document.getElementById('cc-name').value.trim()||'Custom';
   var prefix=document.getElementById('cc-prefix').value.trim()||'U';
   var desc=document.getElementById('cc-desc').value.trim();
-  var model=document.getElementById('cc-model').value.trim();
+  var model=document.getElementById('cc-model').value;
   var validLeft=ccLeftPins.filter(function(p){return p.trim();});
   var validRight=ccRightPins.filter(function(p){return p.trim();});
-  if(validLeft.length===0&&validRight.length===0){
-    alert('Please add at least one signal name on either side');
-    return;
-  }
-  var existingKey=editingCustomCompKey;
+  setCustomCompWarn('pins',validLeft.length===0&&validRight.length===0);
+
   var newKey='custom_'+name.replace(/[^a-zA-Z0-9]/g,'_').toLowerCase();
-  if(existingKey && newKey!==existingKey && customComponents[newKey]){
-    alert('Component with name "'+name+'" already exists. Use a different name.');
-    return;
-  }
-  if(existingKey && existingKey!==newKey){
-    for(var i=0;i<S.components.length;i++){
-      if(S.components[i].type===existingKey){
-        S.components[i].type=newKey;
+  // Which registry we're editing is tracked explicitly via
+  // editingCustomCompScope, NOT inferred from presence — the same key can
+  // legitimately exist in both registries at once (e.g. a library part that
+  // happens to collide in name with an unrelated inline one), and both then
+  // show as separate rows in the management list, each pinned to its own
+  // scope.
+  var isLibraryOnly=editingCustomCompScope==='library';
+  var srcDef=isLibraryOnly?libraryComponents[existingKey]:customComponents[existingKey];
+  var renameBlocked=newKey!==existingKey&&(customComponents[newKey]||libraryComponents[newKey]);
+  setCustomCompWarn('name',!!renameBlocked);
+  var effectiveKey=renameBlocked?existingKey:newKey;
+
+  var oldPins=srcDef?srcDef.pins.slice():null;
+
+  if(!renameBlocked && existingKey!==effectiveKey){
+    if(isLibraryOnly){
+      delete libraryComponents[existingKey];
+    } else {
+      for(var i=0;i<S.components.length;i++){
+        if(S.components[i].type===existingKey)S.components[i].type=effectiveKey;
       }
+      delete customComponents[existingKey];
     }
-  }
-  if(existingKey){
-    delete customComponents[existingKey];
     delete CD[existingKey];
+    editingCustomCompKey=effectiveKey;
   }
-  var config={
-    name:name,
-    prefix:prefix,
-    leftPins:ccLeftPins,
-    rightPins:ccRightPins,
-    description:desc,
-    model:model
-  };
-  var key=createCustomCompDef(newKey,config);
+
+  var config={name:name,prefix:prefix,leftPins:ccLeftPins,rightPins:ccRightPins,description:desc,model:model};
+  var built=createCustomCompDef(effectiveKey,config);
+  if(srcDef&&srcDef._libraryKey)built.def._libraryKey=srcDef._libraryKey;
+  // Editing a library-only entry (opened straight from the list without ever
+  // being placed) updates the library in place; otherwise it's an inline def.
+  if(isLibraryOnly)libraryComponents[effectiveKey]=built.def;
+  else customComponents[effectiveKey]=built.def;
   mergeCustomComponents();
+
+  if(oldPins)relinkCustomCompPins(effectiveKey,oldPins);
+
+  // NOTE: deliberately not calling renderProps() here — it unconditionally
+  // hides #custom-comp-section (see its top), which would close this very
+  // editor on every keystroke. renderAll() is enough to keep the canvas (and
+  // any placed instances) in sync while editing.
   renderCustomCompsList();
   renderAll();
+  if(isLibraryOnly)saveLibrary();else saveSchematic();
+}
+
+function cloneCustomComp(key,scope){
+  if(!scope)scope=customComponents[key]?'inline':'library';
+  var src=scope==='library'?libraryComponents[key]:customComponents[key];
+  if(!src)return;
+  var cfg=extractCustomCompConfig(src);
+  cfg.name=cfg.name+' Copy';
+  var baseKey='custom_'+cfg.name.replace(/[^a-zA-Z0-9]/g,'_').toLowerCase();
+  var newKey=baseKey,n=2;
+  while(customComponents[newKey]||libraryComponents[newKey]){newKey=baseKey+n;n++;}
+  var built=createCustomCompDef(newKey,cfg);
+  // Deliberately no _libraryKey: a clone is an independent derivative, never
+  // linked back to (or able to affect) the component it was cloned from.
+  customComponents[newKey]=built.def;
+  mergeCustomComponents();
+  renderCustomCompsList();
   saveSchematic();
-  editCustomComp(key);
+  editCustomComp(newKey);
+}
+
+function saveCustomCompToLibrary(){
+  // Only meaningful from an inline definition (publishing it to the shared
+  // library). If the open editor is itself the library entry (scope
+  // 'library'), there's nothing to "save to library" — and blindly reading
+  // customComponents[key] here would risk grabbing an unrelated inline def
+  // that happens to share the same key.
+  if(editingCustomCompScope!=='inline')return;
+  var key=editingCustomCompKey;
+  var def=customComponents[key];
+  if(!key||!def)return;
+  var built=createCustomCompDef(key,extractCustomCompConfig(def));
+  libraryComponents[key]=built.def;
+  def._libraryKey=key;
+  saveLibrary();
+  mergeCustomComponents();
+  renderCustomCompsList();
+  saveSchematic();
+}
+
+function updateComponentFromLibrary(typeKey){
+  var inlineDef=customComponents[typeKey];
+  var libKey=inlineDef&&inlineDef._libraryKey;
+  var libDef=libKey&&libraryComponents[libKey];
+  if(!libDef)return;
+  var oldPins=inlineDef.pins.slice();
+  var built=createCustomCompDef(typeKey,extractCustomCompConfig(libDef));
+  built.def._libraryKey=libKey;
+  customComponents[typeKey]=built.def;
+  mergeCustomComponents();
+  relinkCustomCompPins(typeKey,oldPins);
+  renderCustomCompsList();
+  renderAll();
+  renderProps();
+  saveSchematic();
+}
+
+function loadCustomModelFile(){
+  var inp=document.createElement('input');
+  inp.type='file';inp.accept='.lib,.mod,.cir,.sub,.txt,.sp,.spi';
+  inp.addEventListener('change',function(){
+    var file=inp.files[0];if(!file)return;
+    var reader=new FileReader();
+    reader.onload=function(ev){
+      var ta=document.getElementById('cc-model');
+      ta.value=ev.target.result;
+      syncCustomPinsFromModel();
+      commitCustomCompEdit();
+    };
+    reader.readAsText(file);
+  });
+  inp.click();
+}
+
+// Re-derives the pin list from the pasted/loaded model's ".subckt NAME p1 p2
+// ..." header (in header order, first half left, rest right). Only runs on
+// blur/paste-settle (see the model textarea's onchange), not on every
+// keystroke, so it doesn't fight manual pin renames mid-edit. No-op when the
+// model text has no parseable subckt header.
+function syncCustomPinsFromModel(){
+  var text=document.getElementById('cc-model').value;
+  var parsed=parseSubcktHeader(text);
+  if(!parsed||!parsed.pins.length)return;
+  var half=Math.ceil(parsed.pins.length/2);
+  ccLeftPins=parsed.pins.slice(0,half);
+  ccRightPins=parsed.pins.slice(half);
+  if(!ccLeftPins.length)ccLeftPins=[''];
+  if(!ccRightPins.length)ccRightPins=[''];
+  normalizeCustomPinArray(ccLeftPins);
+  normalizeCustomPinArray(ccRightPins);
+  renderCustomPinInputs('left');
+  renderCustomPinInputs('right');
+  commitCustomCompEdit();
 }
 
 function renderCustomCompsList(){
   var container=document.getElementById('custom-comps-list');
   var sidebar=document.getElementById('sidebar-custom-comps');
   if(container)container.innerHTML='';
-  if(sidebar)sidebar.innerHTML='<div class="grp-lbl">Custom</div>';
-  for(var key in customComponents){
-    var def=customComponents[key];
-    var row=document.createElement('div');
-    row.style.display='flex';
-    row.style.alignItems='center';
-    row.style.gap='8px';
-    row.style.padding='6px 12px';
-    row.style.borderBottom='1px solid var(--border)';
-    var delBtn=document.createElement('button');
-    delBtn.className='tb-btn';
-    delBtn.style.width='16px';
-    delBtn.style.height='16px';
-    delBtn.style.minWidth='16px';
-    delBtn.style.padding='0';
-    delBtn.style.flex='none';
-    delBtn.style.display='flex';
-    delBtn.style.alignItems='center';
-    delBtn.style.justifyContent='center';
-    delBtn.style.fontSize='9px';
-    delBtn.title='Delete';
-    delBtn.innerHTML='<span style="color:var(--text-mid)">✕</span>';
-    delBtn.onclick=function(k,el){return function(){confirmDeleteCustomComp(k,el);};}(key,delBtn);
-    var nameLbl=document.createElement('span');
-    nameLbl.style.flex='1';
-    nameLbl.style.fontSize='11px';
-    nameLbl.style.color='var(--text-hi)';
-    nameLbl.style.cursor='pointer';
-    nameLbl.textContent=def._name||def.lbl;
-    nameLbl.onclick=function(k){return function(){editCustomComp(k);};}(key);
-    var chk=document.createElement('input');
-    chk.type='checkbox';
-    chk.value=key;
-    chk.id='cc-chk-'+key;
-    row.appendChild(delBtn);
-    row.appendChild(nameLbl);
-    row.appendChild(chk);
-    if(container)container.appendChild(row);
+  if(sidebar)sidebar.innerHTML='';
+  var keys=Object.keys(customComponents).concat(Object.keys(libraryComponents)).filter(function(k,i,a){return a.indexOf(k)===i;}).sort();
+  // The management list shows ONE ROW PER (key, scope) PAIR — if the same
+  // key exists in both registries (e.g. an inline component that happens to
+  // share a name with an unrelated library part), both show up separately,
+  // each labeled and independently editable/clonable/deletable via their own
+  // scope, rather than one silently shadowing the other.
+  for(var ki=0;ki<keys.length;ki++){
+    var key=keys[ki];
+    if(container){
+      if(customComponents[key])appendCustomCompRow(container,key,'inline',customComponents[key]);
+      if(libraryComponents[key])appendCustomCompRow(container,key,'library',libraryComponents[key]);
+    }
     if(sidebar){
+      var def=CD[key];
+      if(!def)continue;
       var sbBtn=document.createElement('button');
       sbBtn.className='comp-btn';
       sbBtn.innerHTML='<svg class="comp-prev" viewBox="-10 -8 20 16"><rect x="-8" y="-6" width="16" height="12" stroke="#00c8ff" stroke-width="1.5" fill="none"/><line x1="-4" y1="-3" x2="4" y2="-3" stroke="#00c8ff" stroke-width="1"/><line x1="-4" y1="3" x2="4" y2="3" stroke="#00c8ff" stroke-width="1"/></svg>'+(def._name||def.lbl);
@@ -2472,18 +2651,68 @@ function renderCustomCompsList(){
   }
 }
 
+function appendCustomCompRow(container,key,scope,def){
+  var row=document.createElement('div');
+  row.className='cc-comp-row'+(key===editingCustomCompKey&&scope===editingCustomCompScope?' cc-comp-row-active':'');
+  row.style.display='flex';
+  row.style.alignItems='center';
+  row.style.gap='8px';
+  row.style.padding='6px 12px';
+  row.style.borderBottom='1px solid var(--border)';
+  var badge=document.createElement('span');
+  badge.className='cc-scope-badge '+(scope==='inline'?'cc-scope-local':'cc-scope-lib');
+  badge.textContent=scope==='inline'?'LOCAL':'LIB';
+  badge.title=scope==='inline'?'Embedded in this schematic':'From the shared component library';
+  var cloneBtn=document.createElement('button');
+  cloneBtn.className='tb-btn';
+  cloneBtn.style.cssText='width:16px;height:16px;min-width:16px;padding:0;flex:none;display:flex;align-items:center;justify-content:center;font-size:9px;';
+  cloneBtn.title='Clone';
+  cloneBtn.innerHTML='<span style="color:var(--text-mid)">&#10697;</span>';
+  cloneBtn.onclick=function(k,s){return function(){cloneCustomComp(k,s);};}(key,scope);
+  var delBtn=document.createElement('button');
+  delBtn.className='tb-btn';
+  delBtn.style.cssText='width:16px;height:16px;min-width:16px;padding:0;flex:none;display:flex;align-items:center;justify-content:center;font-size:9px;';
+  delBtn.title='Delete';
+  delBtn.innerHTML='<span style="color:var(--text-mid)">✕</span>';
+  delBtn.onclick=function(k,s,el){return function(){confirmDeleteCustomComp(k,s,el);};}(key,scope,delBtn);
+  var nameLbl=document.createElement('span');
+  nameLbl.style.flex='1';
+  nameLbl.style.fontSize='11px';
+  nameLbl.style.color='var(--text-hi)';
+  nameLbl.style.cursor='pointer';
+  nameLbl.textContent=def._name||def.lbl;
+  nameLbl.onclick=function(k,s){return function(){editCustomComp(k,s);};}(key,scope);
+  var chk=document.createElement('input');
+  chk.type='checkbox';
+  chk.value=scope+':'+key;
+  chk.id='cc-chk-'+scope+'-'+key;
+  row.appendChild(badge);
+  row.appendChild(nameLbl);
+  row.appendChild(cloneBtn);
+  row.appendChild(delBtn);
+  row.appendChild(chk);
+  container.appendChild(row);
+}
+
 var pendingDelete=null;
-function confirmDeleteCustomComp(key,btnEl){
-  if(pendingDelete===key){
-    delete customComponents[key];
+function confirmDeleteCustomComp(key,scope,btnEl){
+  // pendingDelete is keyed by "scope:key" (not just key) — the same key can
+  // have two independent rows (inline + library), each with its own
+  // two-click confirm state, so they must not be confused with one another.
+  var pendingId=scope+':'+key;
+  if(pendingDelete===pendingId){
+    var removedInline=scope==='inline';
+    if(removedInline)delete customComponents[key];
+    else delete libraryComponents[key];
     delete CD[key];
+    mergeCustomComponents();
     pendingDelete=null;
     renderCustomCompsList();
-    saveSchematic();
+    if(removedInline)saveSchematic();else saveLibrary();
   }else{
-    pendingDelete=key;
+    pendingDelete=pendingId;
     btnEl.innerHTML='<span style="color:var(--wire-sel)">✔</span>';
-    setTimeout(function(){if(pendingDelete===key){pendingDelete=null;renderCustomCompsList();}},3000);
+    setTimeout(function(){if(pendingDelete===pendingId){pendingDelete=null;renderCustomCompsList();}},3000);
   }
 }
 
@@ -2498,10 +2727,13 @@ function exportSelectedCustomComps(){
   var chks=container.querySelectorAll('input[type=checkbox]:checked');
   var data=[];
   for(var i=0;i<chks.length;i++){
-    var key=chks[i].value;
-    if(customComponents[key]){
-      data.push({key:key,definition:customComponents[key]});
-    }
+    // checkbox value is "scope:key" (see appendCustomCompRow) so a key that
+    // exists in both registries exports the one the checked row actually
+    // represents, not an ambiguous default.
+    var parts=chks[i].value.split(':');
+    var scope=parts[0],key=parts.slice(1).join(':');
+    var def=scope==='library'?libraryComponents[key]:customComponents[key];
+    if(def)data.push({key:key,definition:def});
   }
   if(data.length===0){
     alert('No components selected');
@@ -2515,36 +2747,35 @@ function exportSelectedCustomComps(){
 }
 
 function importCustomComp(){
-  document.getElementById('custom-import-file').click();
-}
-
-function handleCustomImport(event){
-  var file=event.target.files[0];
-  if(!file)return;
-  var reader=new FileReader();
-  reader.onload=function(e){
-    try{
-      var data=JSON.parse(e.target.result);
-      var arr=Array.isArray(data)?data:[data];
-      for(var i=0;i<arr.length;i++){
-        var item=arr[i];
-        if(item.key&&item.definition){
-          customComponents[item.key]=item.definition;
-          CD[item.key]=item.definition;
+  var inp=document.createElement('input');
+  inp.type='file';inp.accept='.json';
+  inp.addEventListener('change',function(){
+    var file=inp.files[0];if(!file)return;
+    var reader=new FileReader();
+    reader.onload=function(e){
+      try{
+        var data=JSON.parse(e.target.result);
+        var arr=Array.isArray(data)?data:[data];
+        for(var i=0;i<arr.length;i++){
+          var item=arr[i];
+          if(item.key&&item.definition){
+            customComponents[item.key]=item.definition;
+          }
         }
+        mergeCustomComponents();
+        renderCustomCompsList();
+        saveSchematic();
+      }catch(err){
+        alert('Failed to import: '+err.message);
       }
-      renderCustomCompsList();
-      saveSchematic();
-    }catch(err){
-      alert('Failed to import: '+err.message);
-    }
-  };
-  reader.readAsText(file);
-  event.target.value='';
+    };
+    reader.readAsText(file);
+  });
+  inp.click();
 }
 
 function exportCustomComp(key){
-  var def=customComponents[key];
+  var def=customComponents[key]||libraryComponents[key];
   if(!def)return;
   var data={key:key,definition:def};
   var blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
@@ -2554,15 +2785,46 @@ function exportCustomComp(key){
   a.click();
 }
 
-function renderCustomCompExportList(){}
+// ═══ COMPONENT LIBRARY (persistent, schematic-independent) ═══
+function saveLibrary(){
+  try{ localStorage.setItem('schematic_library',JSON.stringify(libraryComponents)); }
+  catch(e){console.warn('Failed to save component library',e);}
+}
+function loadLibrary(){
+  try{
+    var raw=localStorage.getItem('schematic_library');
+    if(raw)libraryComponents=JSON.parse(raw);
+  }catch(e){console.warn('Failed to load component library',e);}
+}
+// Seeds first-run/newly-added library parts from lib/default_components.json.
+// Only fills in keys the local library doesn't already have, so the user's
+// own library edits survive across reloads; skipped silently when there is
+// no dev server to fetch from (see CLAUDE.md — never opened via file://).
+function seedLibraryFromDefaults(){
+  fetch('lib/default_components.json').then(function(r){return r.ok?r.json():null;})
+    .then(function(arr){
+      if(!Array.isArray(arr))return;
+      var changed=false;
+      for(var i=0;i<arr.length;i++){
+        var item=arr[i];
+        if(item&&item.key&&item.definition&&!libraryComponents[item.key]){
+          libraryComponents[item.key]=item.definition;
+          changed=true;
+        }
+      }
+      if(changed){ saveLibrary(); mergeCustomComponents(); renderCustomCompsList(); renderAll(); }
+    }).catch(function(){});
+}
 
 // ═══ INIT ═══
+loadLibrary();
 mergeCustomComponents();
 loadSchematic();
 renderAll();renderProps();
 zoomToFit();
 if(undoStack.length===0){ clearHistory(); pushState(); }
-if(Object.keys(customComponents).length>0){renderCustomCompsList();}
+renderCustomCompsList();
+seedLibraryFromDefaults();
 
 // ═══ SIDEBAR RESIZERS ═══
 function initResizer(sidebarId,resizerId,isLeft){

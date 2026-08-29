@@ -63,7 +63,22 @@ function renderMiniMarkdown(src){
 // GND: pin at (0,0) top, body goes downward.
 // VCC: pin at (0,0) bottom, body goes upward.
 // ═══════════════════════════════════════════════════
+// Custom components live in two separate registries:
+//  - libraryComponents: persistent, schematic-independent "parts bin"
+//    (localStorage key 'schematic_library', seeded from
+//    lib/default_components.json). Never touched by loadSchematic/importSVG.
+//  - customComponents: the definitions actually embedded in/owned by the
+//    CURRENT schematic ("inline"). Replaced wholesale whenever a schematic is
+//    loaded/imported, same as the rest of S.* — that is intentional, a
+//    document brings its own copies with it.
+// CD (the flat runtime dictionary used everywhere for rendering/placement/
+// netlisting) is built by layering both registries via mergeCustomComponents,
+// library first so an inline definition always wins on key collision — a
+// loaded schematic renders/simulates exactly as authored, regardless of what
+// the user's local library has since diverged into. See DOKUMENTATION.md
+// chapter 8 for the full rationale.
 var customComponents={};
+var libraryComponents={};
 
 // Custom components are persisted via JSON.stringify (localStorage / export),
 // which silently drops their `draw` function. mergeCustomComponents rebuilds a
@@ -71,34 +86,95 @@ var customComponents={};
 // so a round-tripped definition stays renderable. This is why custom defs can
 // be saved as plain data without losing their symbol.
 function mergeCustomComponents(){
-  for(var key in customComponents){
-    var comp=customComponents[key];
-    if(comp && !comp.draw){
-      var bodyW=comp.hitW-40;
-      var bodyH=comp.hitH;
-      var name=comp._name||comp.lbl;
-      var prefix=comp.lbl;
-      comp.draw=function(g,v){
-        R(g,-bodyW/2,-bodyH/2,bodyW,bodyH,'comp-body');
-        T(g,0,-bodyH/2-8,v.label||prefix+'1','comp-label');
-        T(g,0,bodyH/2+8,name,'comp-value');
-        for(var i=0;i<comp.pins.length;i++){
-          var pin=comp.pins[i];
-          var isLeft=pin.x<0;
-          var pinY=pin.y;
-          var frameX=isLeft?-bodyW/2:bodyW/2;
-          var outX=isLeft?frameX-20:frameX+20;
-          L(g,frameX,pinY,outX,pinY,'comp-pin');
-          var textEl=el('text',{x:isLeft?frameX+8:frameX-8,y:pinY+4});
-          textEl.textContent=pin.n;
-          textEl.setAttribute('class','comp-label');
-          textEl.setAttribute('text-anchor',isLeft?'start':'end');
-          g.appendChild(textEl);
-        }
-      };
+  function install(reg){
+    for(var key in reg){
+      var comp=reg[key];
+      if(comp && !comp.draw){
+        var bodyW=comp.hitW-40;
+        var bodyH=comp.hitH;
+        var name=comp._name||comp.lbl;
+        var prefix=comp.lbl;
+        comp.draw=function(g,v){
+          R(g,-bodyW/2,-bodyH/2,bodyW,bodyH,'comp-body');
+          T(g,0,-bodyH/2-8,v.label||prefix+'1','comp-label');
+          T(g,0,bodyH/2+8,name,'comp-value');
+          for(var i=0;i<comp.pins.length;i++){
+            var pin=comp.pins[i];
+            var isLeft=pin.x<0;
+            var pinY=pin.y;
+            var frameX=isLeft?-bodyW/2:bodyW/2;
+            var outX=isLeft?frameX-20:frameX+20;
+            L(g,frameX,pinY,outX,pinY,'comp-pin');
+            var textEl=el('text',{x:isLeft?frameX+8:frameX-8,y:pinY+4});
+            textEl.textContent=pin.n;
+            textEl.setAttribute('class','comp-label');
+            textEl.setAttribute('text-anchor',isLeft?'start':'end');
+            g.appendChild(textEl);
+          }
+        };
+      }
+      CD[key]=comp;
     }
-    CD[key]=comp;
   }
+  install(libraryComponents);
+  install(customComponents);
+}
+
+// Reverse of createCustomCompDef: extracts the editable {name,prefix,
+// leftPins,rightPins,description,model} config back out of a built
+// definition. Shared by the editor's "load into form" step, cloning, "Save
+// to Library" and "Update from Library" — anywhere an existing def needs to
+// become a fresh, correctly-closured one again via createCustomCompDef.
+function extractCustomCompConfig(def){
+  var leftPins=[],rightPins=[];
+  for(var i=0;i<(def.pins||[]).length;i++){
+    var p=def.pins[i];
+    (p.x<0?leftPins:rightPins).push(p.n||'');
+  }
+  if(!leftPins.length)leftPins=[''];
+  if(!rightPins.length)rightPins=[''];
+  return {
+    name:def._name||def.lbl||'Custom',
+    prefix:def.lbl||'U',
+    leftPins:leftPins,
+    rightPins:rightPins,
+    description:def._desc||'',
+    model:def._model||''
+  };
+}
+
+// Finds the first ".subckt NAME p1 p2 ..." line (honouring "+" continuation
+// lines) and returns {name,pins} node names, or null. Pin-list parsing stops
+// at a "PARAMS:" marker or the first "key=value" token, since those are
+// subcircuit parameters, not connection nodes.
+function parseSubcktHeader(text){
+  if(!text)return null;
+  var lines=String(text).split(/\r\n|\r|\n/);
+  for(var i=0;i<lines.length;i++){
+    var m=lines[i].match(/^\s*\.subckt\s+(\S+)\s*(.*)$/i);
+    if(!m)continue;
+    var name=m[1];
+    var rest=m[2]||'';
+    var j=i+1;
+    while(j<lines.length && /^\s*\+/.test(lines[j])){ rest+=' '+lines[j].replace(/^\s*\+/,''); j++; }
+    var tokens=rest.trim().split(/\s+/).filter(Boolean);
+    var pins=[];
+    for(var k=0;k<tokens.length;k++){
+      var t=tokens[k];
+      if(/^params:$/i.test(t))break;
+      if(t.indexOf('=')>=0)break;
+      pins.push(t);
+    }
+    return {name:name,pins:pins};
+  }
+  return null;
+}
+
+// Prefers the name declared by the attached model's own .subckt header (the
+// X-line must call that exact name) over the editor's cosmetic "Name" field.
+function customSubcktName(def){
+  var parsed=def&&def._model?parseSubcktHeader(def._model):null;
+  return (parsed&&parsed.name)||(def&&(def._name||def.lbl))||'';
 }
 
 function createCustomCompDef(providedKey,config){
@@ -155,8 +231,10 @@ function createCustomCompDef(providedKey,config){
       }
     }
   };
-  customComponents[key]=def;
-  return key;
+  // Pure builder: does NOT assign into any registry. The caller decides
+  // whether this def becomes an inline (customComponents), library
+  // (libraryComponents) or throwaway/preview definition.
+  return {key:key,def:def};
 }
 
 const CD={

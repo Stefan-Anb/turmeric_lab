@@ -1,0 +1,7 @@
+* Dummy example subcircuit for testing the Custom Component "Load file..."
+* model import: pasting/loading this into a component's Model field should
+* automatically derive the pins IN+, IN-, VCC, VEE, OUT (3 left / 2 right).
+.subckt DUMMY_OPAMP1 IN+ IN- VCC VEE OUT
+* (placeholder ideal op-amp macro model, positional pins only)
+Eout OUT 0 IN+ IN- 100k
+.ends DUMMY_OPAMP1

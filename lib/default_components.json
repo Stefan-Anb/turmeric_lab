@@ -1,0 +1,22 @@
+[
+  {
+    "key": "custom_dummy_opamp1",
+    "definition": {
+      "lbl": "U",
+      "val": "",
+      "hitW": 200,
+      "hitH": 100,
+      "props": { "label": { "l": "Reference" } },
+      "_desc": "Dummy example op-amp subcircuit (for testing the library/model-import workflow)",
+      "_model": ".subckt DUMMY_OPAMP1 IN+ IN- VCC VEE OUT\n* placeholder ideal op-amp macro model, positional pins only\nEout OUT 0 IN+ IN- 100k\n.ends DUMMY_OPAMP1",
+      "_name": "Dummy Opamp1",
+      "pins": [
+        { "x": -120, "y": -20, "n": "IN+" },
+        { "x": -120, "y": 0, "n": "IN-" },
+        { "x": -120, "y": 20, "n": "VCC" },
+        { "x": 120, "y": -10, "n": "VEE" },
+        { "x": 120, "y": 10, "n": "OUT" }
+      ]
+    }
+  }
+]
