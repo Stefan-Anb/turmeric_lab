@@ -2041,7 +2041,15 @@ function exportSVG(){
   clone.insertBefore(bgRect,clone.firstChild);
   // Insert print-oriented B/W styles with thicker strokes
   var st=document.createElementNS('http://www.w3.org/2000/svg','style');
-  st.textContent='.wire-vis{stroke:#000;stroke-width:2.5;fill:none;stroke-linecap:square}.comp-body{stroke:#000;stroke-width:2;fill:#ffffff}.comp-pin{stroke:#000;stroke-width:2;fill:none}.comp-label{fill:#000;font-family:monospace;font-size:18px}.comp-value{fill:#000;font-family:monospace;font-size:16px}.pin-dot{fill:#000}.junction-vis{fill:#000;stroke:#000;stroke-width:1} text{fill:#000}';
+  // NOTE: the exported SVG carries none of styles.css (only this inline
+  // block) — any class without a rule here falls back to the SVG default
+  // fill, which is solid black. blanket-frame/image-frame/note-body are
+  // plain <rect>s with no inline fill/stroke (styling lives entirely in
+  // styles.css for the live canvas), so they need explicit entries here too,
+  // or they render as opaque black boxes in the export (hiding the embedded
+  // image entirely, and turning the blanket into a black block instead of a
+  // dashed outline).
+  st.textContent='.wire-vis{stroke:#000;stroke-width:2.5;fill:none;stroke-linecap:square}.comp-body{stroke:#000;stroke-width:2;fill:#ffffff}.comp-pin{stroke:#000;stroke-width:2;fill:none}.comp-label{fill:#000;font-family:monospace;font-size:18px}.comp-value{fill:#000;font-family:monospace;font-size:16px}.pin-dot{fill:#000}.junction-vis{fill:#000;stroke:#000;stroke-width:1} text{fill:#000}.blanket-frame{fill:none;stroke:#000;stroke-width:1.5;stroke-dasharray:6 4}.blanket-title{fill:#000;font-family:monospace;font-size:16px}.image-frame{fill:none;stroke:#000;stroke-width:1}.note-body{fill:#ffffff;stroke:#000;stroke-width:1.5}.note-text{color:#000}';
   clone.insertBefore(st,bgRect.nextSibling);
   // Embed schematic state for round-trip import
   var desc=document.createElementNS('http://www.w3.org/2000/svg','desc');
