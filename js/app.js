@@ -3,10 +3,37 @@
 // ═══════════════════════════════════════════════════
 /* GRID and schematic core moved to js/schematic.js */
 const svg=document.getElementById('schematic-svg');
+const lyrBlk=document.getElementById('lyr-blankets');
 const lyrW=document.getElementById('lyr-wires');
 const lyrC=document.getElementById('lyr-comps');
 const lyrJ=document.getElementById('lyr-junc');
 const lyrO=document.getElementById('lyr-overlay');
+
+// Pure UI annotation types (never appear in the netlist, never rotate/mirror).
+const UI_ANNOTATION_TYPES=['blanket','image','note','textlabel'];
+// Types anchored at their TOP-LEFT corner (x,y) with explicit w/h, instead of
+// the usual "anchored at center" convention every electrical component uses.
+const TOPLEFT_BOX_TYPES=['blanket','image','note'];
+
+// Bounding box (world coords) for a component, used by marquee selection and
+// zoom-to-fit. Handles the top-left-anchored box types and the measured
+// text-label bbox specially; falls back to the usual centered hitW/hitH box.
+function compBBox(c){
+  if(TOPLEFT_BOX_TYPES.includes(c.type)){
+    var w=parseFloat(c.w)||(c.type==='image'?200:(c.type==='note'?220:400));
+    var h=parseFloat(c.h)||(c.type==='image'?150:(c.type==='note'?160:300));
+    return {left:c.x,right:c.x+w,top:c.y,bottom:c.y+h};
+  }
+  if(c.type==='textlabel'){
+    var fs=parseFloat(c.fontSize)||16;
+    var mx=c._mx!=null?c._mx:0, my=c._my!=null?c._my:-fs;
+    var mw=c._mw!=null?c._mw:((c.label||'').length*fs*0.6), mh=c._mh!=null?c._mh:fs*1.3;
+    return {left:c.x+mx,right:c.x+mx+mw,top:c.y+my,bottom:c.y+my+mh};
+  }
+  const def=CD[c.type]; const rot=c.rot||0; const isVert=(rot===90||rot===270);
+  const hw=(isVert?def.hitH:def.hitW)/2, hh=(isVert?def.hitW:def.hitH)/2;
+  return {left:c.x-hw,right:c.x+hw,top:c.y-hh,bottom:c.y+hh};
+}
 
 // Undo/Redo history
 let undoStack=[]; let redoStack=[]; const HISTORY_MAX=200; let isRestoring=false;
@@ -93,11 +120,12 @@ function finishSelection(sx,sy,ex,ey){
   if(Math.abs(r.width)<GRID && Math.abs(r.height)<GRID){ clearSel(); renderAll(); renderProps(); return; }
   const leftToRight = ex>sx;
   const newSel=[];
-  // Components: use hitW/hitH (respecting rotation)
+  // Components: use compBBox (respecting rotation / top-left-anchored types)
   for(const c of S.components){
-    const def=CD[c.type]; const rot=c.rot||0; const isVert=(rot===90||rot===270);
-    const hw=(isVert?def.hitH:def.hitW)/2, hh=(isVert?def.hitW:def.hitH)/2;
-    const cb={left:c.x-hw,right:c.x+hw,top:c.y-hh,bottom:c.y+hh};
+    // Blanket is a pure background annotation: never selectable via marquee,
+    // only via its title text (see onBlanketTitleDown).
+    if(c.type==='blanket') continue;
+    const cb=compBBox(c);
     if(leftToRight){ if(rectContainsRect(r,cb)) newSel.push({type:'comp',id:c.id}); }
     else { if(rectIntersects(r,cb)) newSel.push({type:'comp',id:c.id}); }
   }
@@ -140,11 +168,49 @@ function applyView(){
 /* Finder functions moved to js/schematic.js (findPin, findWireEnd, findWireSeg, nearSeg, juncAt, wireEndsAt) */
 
 // ═══ RENDER ═══
-function renderAll(){renderComps();renderWires();renderJuncs();updateStatus();}
+function renderAll(){renderBlankets();renderComps();renderWires();renderJuncs();updateStatus();}
+
+// Appends a small circular resize handle (corner, free w+h resize) at local
+// (hx,hy) inside g, wired to start a resize drag on mousedown. Only ever
+// called for the currently-selected element (handles aren't rendered
+// otherwise).
+function addResizeHandle(g,hx,hy,cursor,target){
+  var h=CE(g,hx,hy,6,'resize-handle');
+  h.style.cursor=cursor;
+  h.addEventListener('mousedown',function(e){ startResizeDrag(e,target); });
+  return h;
+}
+
+// Appends a crop handle at the midpoint of one edge — deliberately shaped
+// and colored differently from addResizeHandle's round corner dot (a small
+// notched bracket, the same "trim this edge" affordance used by crop tools
+// in image editors) so the two are never confused by touch/click.
+// orientation 'h' = handle sits on a horizontal (top/bottom) edge, so the
+// bracket opens vertically; 'v' = left/right edge, bracket opens horizontally.
+function addCropHandle(g,hx,hy,orientation,cursor,target){
+  var grp=el('g',{class:'crop-handle',transform:`translate(${hx},${hy})`});
+  grp.style.cursor=cursor;
+  if(orientation==='h'){
+    R(grp,-9,-3,18,6,'crop-handle-bar');
+    L(grp,-9,-6,-9,6,'crop-handle-tick');
+    L(grp,9,-6,9,6,'crop-handle-tick');
+  } else {
+    R(grp,-3,-9,6,18,'crop-handle-bar');
+    L(grp,-6,-9,6,-9,'crop-handle-tick');
+    L(grp,-6,9,6,9,'crop-handle-tick');
+  }
+  // Invisible, larger hit area — the visible bracket is thin, the click
+  // target shouldn't be.
+  R(grp,-10,-10,20,20,'crop-handle-hit');
+  g.appendChild(grp);
+  grp.addEventListener('mousedown',function(e){ startResizeDrag(e,target); });
+  return grp;
+}
 
 function renderComps(){
   lyrC.innerHTML='';
   for(const comp of S.components){
+    if(comp.type==='blanket') continue; // rendered separately, always in the background
     const def=CD[comp.type];
     var rot=comp.rot||0,mir=comp.mirror||false;
     const g=el('g',{
@@ -167,9 +233,30 @@ function renderComps(){
         drawG.removeChild(txt);g.appendChild(txt);
       }
     }
-    var isVert=(rot===90||rot===270);
-    var hrW=isVert?def.hitH:def.hitW,hrH=isVert?def.hitW:def.hitH;
-    R(g,-hrW/2,-hrH/2,hrW,hrH,'hit-rect');
+    var isSelected=S.selected.some(function(s){return s.type==='comp'&&s.id===comp.id;});
+    if(TOPLEFT_BOX_TYPES.includes(comp.type)){
+      var bw=parseFloat(comp.w)||(comp.type==='image'?200:220),bh=parseFloat(comp.h)||(comp.type==='image'?150:160);
+      R(g,0,0,bw,bh,'hit-rect');
+      if(isSelected&&comp.type==='image'){
+        addResizeHandle(g,bw,bh,'nwse-resize',{type:'resize',id:comp.id});
+        addCropHandle(g,bw/2,0,'h','ns-resize',{type:'crop',id:comp.id,edge:'top'});
+        addCropHandle(g,bw/2,bh,'h','ns-resize',{type:'crop',id:comp.id,edge:'bottom'});
+        addCropHandle(g,0,bh/2,'v','ew-resize',{type:'crop',id:comp.id,edge:'left'});
+        addCropHandle(g,bw,bh/2,'v','ew-resize',{type:'crop',id:comp.id,edge:'right'});
+      } else if(isSelected&&comp.type==='note'){
+        addResizeHandle(g,bw,bh,'nwse-resize',{type:'resize',id:comp.id});
+      }
+    } else if(comp.type==='textlabel'){
+      var txtEl=g.querySelector('.text-label');
+      var bb={x:0,y:-16,width:(comp.label||'').length*9,height:20};
+      try{ if(txtEl&&typeof txtEl.getBBox==='function') bb=txtEl.getBBox(); }catch(e){}
+      comp._mx=bb.x;comp._my=bb.y;comp._mw=bb.width;comp._mh=bb.height;
+      R(g,bb.x,bb.y,bb.width||1,bb.height||1,'hit-rect');
+    } else {
+      var isVert=(rot===90||rot===270);
+      var hrW=isVert?def.hitH:def.hitW,hrH=isVert?def.hitW:def.hitH;
+      R(g,-hrW/2,-hrH/2,hrW,hrH,'hit-rect');
+    }
     for(let i=0;i<def.pins.length;i++){
       const pin=def.pins[i];
       var tp=xfPin(pin.x,pin.y,rot,mir);
@@ -187,10 +274,46 @@ function renderComps(){
         else{startWireFromPin(absX,absY,{type:'pin',compId:comp.id,pinIdx:i});}
       };})(comp,tp.x,tp.y,i));
     }
-    if(S.selected.some(function(s){return s.type==='comp'&&s.id===comp.id;}))g.classList.add('selected');
+    if(isSelected)g.classList.add('selected');
     g.addEventListener('mousedown',(function(id){return function(e){onCompDown(e,id);};})(comp.id));
     lyrC.appendChild(g);
   }
+}
+
+// Blanket is a pure background annotation: always rendered into #lyr-blankets
+// (structurally before every other layer, so it's always behind everything
+// regardless of S.components order), and only its title text is
+// clickable/draggable — the frame itself has pointer-events:none (see CSS)
+// so clicks pass through to whatever is drawn on top of it.
+function renderBlankets(){
+  lyrBlk.innerHTML='';
+  for(const comp of S.components){
+    if(comp.type!=='blanket') continue;
+    const def=CD.blanket;
+    const g=el('g',{transform:`translate(${comp.x},${comp.y})`,class:'component-group',
+      'data-id':comp.id,'data-type':'blanket'});
+    def.draw(g,comp);
+    var isSelected=S.selected.some(function(s){return s.type==='comp'&&s.id===comp.id;});
+    if(isSelected)g.classList.add('selected');
+    var title=g.querySelector('.blanket-title');
+    if(title){
+      title.addEventListener('mousedown',(function(id){return function(e){onBlanketTitleDown(e,id);};})(comp.id));
+    }
+    if(isSelected){
+      var bw=parseFloat(comp.w)||400,bh=parseFloat(comp.h)||300;
+      addResizeHandle(g,bw,bh,'nwse-resize',{type:'resize',id:comp.id});
+    }
+    lyrBlk.appendChild(g);
+  }
+}
+
+function onBlanketTitleDown(e,id){
+  if(e.button!==0)return; e.stopPropagation();
+  if(S.mode!=='select')return;
+  if(!S.selected.some(function(s){return s.type==='comp'&&s.id===id;})){
+    clearSel();S.selected=[{type:'comp',id:id}];renderAll();renderProps();
+  }
+  startDrag(e,{type:'comp',id:id});
 }
 
 function renderWires(){
@@ -323,6 +446,14 @@ function renderProps(){
         html+='<label style="display:flex;align-items:center;gap:6px"><input type="radio" name="prop-'+key+'" data-key="'+key+'" value="'+opt.v+'"'+chk+'> '+opt.l+'</label>';
       }
       html+='</div></div>';
+    } else if(pd.type==='bool'){
+      const chk=comp[key]?' checked':'';
+      html+='<div class="prop-row" style="flex-direction:row;align-items:center;gap:8px;padding:8px 12px">'+
+      '<input type="checkbox" data-key="'+key+'" id="prop-bool-'+key+'"'+chk+'>'+
+      '<label for="prop-bool-'+key+'" class="prop-lbl" style="margin:0">'+pd.l+'</label></div>';
+    } else if(pd.type==='textarea'){
+      html+='<div class="prop-row"><div class="prop-lbl">'+pd.l+'</div>'+
+      '<textarea class="prop-input" data-key="'+key+'" rows="6">'+esc(String(val))+'</textarea></div>';
     } else {
       const ph=pd.def!=null?' placeholder="'+esc(String(pd.def))+'"':'';
       html+='<div class="prop-row"><div class="prop-lbl">'+pd.l+'</div>'+
@@ -365,6 +496,14 @@ function renderProps(){
       }
     });
   });
+  // boolean checkboxes
+  pc.querySelectorAll('input[type=checkbox][data-key]').forEach(function(cb){
+    var key=cb.getAttribute('data-key');
+    cb.addEventListener('change',function(){
+      comp[key]=cb.checked;
+      renderAll();
+    });
+  });
 }
 function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
 
@@ -398,6 +537,7 @@ function selectComp(type,ev){
 // canvas places it at the drop position (an alternative to click-to-arm +
 // click-to-place, which keeps working).
 var dndType=null;
+var lastMousePt=null; // last known SVG-space mouse position, used to place OS-clipboard image pastes near the cursor
 (function initCompDnD(){
   function attach(){
     var sidebar=document.getElementById('sidebar');
@@ -421,17 +561,33 @@ var dndType=null;
       if(S.mode!=='place')clearGhost();
     });
     pane.addEventListener('dragover',function(e){
-      if(!dndType)return;
-      e.preventDefault();
-      if(e.dataTransfer)e.dataTransfer.dropEffect='copy';
-      var pt=svgPt(e),sp=snp(pt.x,pt.y);
-      showGhost(dndType);
-      moveGhost(sp.x,sp.y);
+      if(dndType){
+        e.preventDefault();
+        if(e.dataTransfer)e.dataTransfer.dropEffect='copy';
+        var pt=svgPt(e),sp=snp(pt.x,pt.y);
+        showGhost(dndType);
+        moveGhost(sp.x,sp.y);
+        return;
+      }
+      // OS file drag (e.g. an image from the desktop/Explorer): allow the drop.
+      if(e.dataTransfer&&e.dataTransfer.types&&Array.from(e.dataTransfer.types).includes('Files')){
+        e.preventDefault();
+        if(e.dataTransfer)e.dataTransfer.dropEffect='copy';
+      }
     });
     pane.addEventListener('dragleave',function(e){
       if(dndType&&!pane.contains(e.relatedTarget))clearGhost();
     });
     pane.addEventListener('drop',function(e){
+      if(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files.length){
+        var f=e.dataTransfer.files[0];
+        if(f&&f.type&&f.type.indexOf('image/')===0){
+          e.preventDefault();
+          dndType=null; clearGhost();
+          placeImageFromFile(f,svgPt(e));
+          return;
+        }
+      }
       var type=dndType||(e.dataTransfer?e.dataTransfer.getData('text/plain'):'');
       if(!type)return;
       e.preventDefault();
@@ -446,6 +602,49 @@ var dndType=null;
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',attach);else attach();
 })();
+
+// ═══ IMAGE INSERTION (File menu, drag&drop of files, Ctrl+V of OS clipboard) ═══
+// All three entry points funnel through placeImageFromFile()/placeImageComp(),
+// mirroring placeComp()'s generic "push, render, pushState, save" pattern.
+function viewCenterPoint(){
+  var r=svg.getBoundingClientRect();
+  var w=r.width/view.zoom,h=r.height/view.zoom;
+  return snp(view.x+w/2,view.y+h/2);
+}
+function insertImageViaFilePicker(){
+  var inp=document.createElement('input');
+  inp.type='file';inp.accept='image/*';
+  inp.addEventListener('change',function(){
+    var file=inp.files[0];if(!file)return;
+    placeImageFromFile(file,viewCenterPoint());
+  });
+  inp.click();
+}
+function placeImageFromFile(file,dropPoint){
+  if(!file||!file.type||file.type.indexOf('image/')!==0)return;
+  var reader=new FileReader();
+  reader.onload=function(ev){
+    var dataURL=ev.target.result;
+    var img=new Image();
+    img.onload=function(){ placeImageComp(dataURL,img.naturalWidth||200,img.naturalHeight||150,dropPoint); };
+    img.onerror=function(){ placeImageComp(dataURL,200,150,dropPoint); };
+    img.src=dataURL;
+  };
+  reader.readAsDataURL(file);
+}
+function placeImageComp(dataURL,natW,natH,dropPoint){
+  var maxDim=600;
+  var scale=Math.min(1,maxDim/Math.max(natW,natH));
+  var w=Math.max(GRID,Math.round(natW*scale/GRID)*GRID);
+  var h=Math.max(GRID,Math.round(natH*scale/GRID)*GRID);
+  var sp=snp(dropPoint.x-w/2,dropPoint.y-h/2);
+  var comp={id:newId(),type:'image',x:sp.x,y:sp.y,w:w,h:h,src:dataURL,
+    natW:natW,natH:natH,crop:{x:0,y:0,w:natW,h:natH},label:'Image'};
+  S.components.push(comp);
+  clearSel();S.selected=[{type:'comp',id:comp.id}];
+  renderAll();renderProps();
+  pushState();saveSchematic();
+}
 
 // ═══ GHOST ═══
 var ghostEl=null;var placeRot=0,placeMirror=false;
@@ -695,6 +894,7 @@ svg.addEventListener('mousemove',function(e){
     applyView();return;
   }
   var pt=svgPt(e);var sp=snp(pt.x,pt.y);
+  lastMousePt=pt;
   document.getElementById('sb-x').textContent=sp.x;
   document.getElementById('sb-y').textContent=sp.y;
   if(S.pasteMode.active){
@@ -1005,7 +1205,10 @@ function nextRefNum(prefix){
 function placeComp(type,sp){
   var def=CD[type];
   var lbl=type==='netconn'?'NET':def.lbl+nextRefNum(def.lbl);
-  var comp={id:newId(),type:type,x:sp.x,y:sp.y,label:lbl,value:def.val,rot:placeRot,mirror:placeMirror,props:{}};
+  // Annotations never rotate/mirror (see rotateSelected/mirrorSelected) — ignore
+  // any leftover placeRot/placeMirror from a previous rotated placement.
+  var isAnno=UI_ANNOTATION_TYPES.includes(type);
+  var comp={id:newId(),type:type,x:sp.x,y:sp.y,label:lbl,value:def.val,rot:isAnno?0:placeRot,mirror:isAnno?false:placeMirror,props:{}};
   // initialize enum and plain property defaults
   for(const[key,pd]of Object.entries(def.props||{})){
     if(pd.type==='enum'&&Array.isArray(pd.options)&&!comp[key]){comp[key]=pd.options[0].v;}
@@ -1120,6 +1323,8 @@ function startWireDrag(e,wid){
 function onDragMove(e){
   var pt=svgPt(e);
   if(S.drag.target.type==='wire-seg'){onWireSegDragMove(e);return;}
+  if(S.drag.target.type==='resize'){onResizeMove(e);return;}
+  if(S.drag.target.type==='crop'){onCropMove(e);return;}
   if(S.drag.target.type==='group'){
     // compute snapped delta from start mouse
     var dx=snap(pt.x-S.drag.sm.x), dy=snap(pt.y-S.drag.sm.y);
@@ -1256,6 +1461,104 @@ function updateConnectedEndpoint(w,end,pt){
   }
 }
 
+// ═══ RESIZE / CROP DRAG (blanket + image) ═══
+// Shares the S.drag state machine used by comp/junction/wire-seg drags —
+// dispatched from onDragMove via target.type==='resize'|'crop', finalized
+// generically by onDragEnd (no net cleanup needed: these types have pins:[]).
+function startResizeDrag(e,target){
+  e.stopPropagation(); e.preventDefault();
+  var c=S.components.find(function(cc){return cc.id===target.id;}); if(!c)return;
+  var defW=c.type==='image'?200:(c.type==='note'?220:400), defH=c.type==='image'?150:(c.type==='note'?160:300);
+  S.drag={active:true,target:target,sm:svgPt(e),
+    w0:parseFloat(c.w)||defW, h0:parseFloat(c.h)||defH, x0:c.x, y0:c.y,
+    crop0: c.crop?{x:c.crop.x,y:c.crop.y,w:c.crop.w,h:c.crop.h}:null,
+    moved:false};
+}
+
+function onResizeMove(e){
+  var pt=svgPt(e);
+  var c=S.components.find(function(cc){return cc.id===S.drag.target.id;}); if(!c)return;
+  var dx=snap(pt.x-S.drag.sm.x), dy=snap(pt.y-S.drag.sm.y);
+  var minSize=GRID*2;
+  var nw,nh;
+  if(c.type==='image' && S.drag.w0>0 && S.drag.h0>0){
+    // Images keep their aspect ratio on a corner resize (crop separately if
+    // you want a different shape) — drive the resize from whichever axis is
+    // being dragged further, so a diagonal drag feels natural either way.
+    var ratio=S.drag.w0/S.drag.h0;
+    if(Math.abs(dx)>=Math.abs(dy)*ratio){ nw=S.drag.w0+dx; nh=nw/ratio; }
+    else { nh=S.drag.h0+dy; nw=nh*ratio; }
+    if(nw<minSize){ nw=minSize; nh=nw/ratio; }
+    if(nh<minSize){ nh=minSize; nw=nh*ratio; }
+  } else {
+    nw=Math.max(minSize, S.drag.w0+dx);
+    nh=Math.max(minSize, S.drag.h0+dy);
+  }
+  if(nw===c.w && nh===c.h) return;
+  c.w=nw; c.h=nh;
+  S.drag.moved=true;
+  renderAll();
+}
+
+// Non-destructive crop: dragging an edge handle inward shrinks the visible
+// box AND the same fraction of the crop rect on that side (in the image's
+// natural pixel space); dragging back out grows the crop rect again, up to
+// the original image bounds. The source image data is never modified.
+function onCropMove(e){
+  var pt=svgPt(e);
+  var c=S.components.find(function(cc){return cc.id===S.drag.target.id;});
+  if(!c||c.type!=='image'||!c.crop)return;
+  var edge=S.drag.target.edge;
+  var crop0=S.drag.crop0;
+  var natW=c.natW||S.drag.w0, natH=c.natH||S.drag.h0;
+  var minBox=GRID; // minimum on-screen box size along the cropped axis
+  if(edge==='left'||edge==='right'){
+    var scale=S.drag.w0>0?crop0.w/S.drag.w0:1;
+    var dx=snap(pt.x-S.drag.sm.x);
+    if(edge==='right'){
+      var maxW=natW-crop0.x; // can't grow past the right edge of the source image
+      var minW=Math.max(1,minBox*scale);
+      var newCropW=Math.min(maxW, Math.max(minW, crop0.w+dx*scale));
+      var boxDx=(newCropW-crop0.w)/scale;
+      c.crop.w=newCropW; c.w=Math.max(minBox, S.drag.w0+boxDx);
+    } else { // left
+      var minW2=Math.max(1,minBox*scale);
+      var newCropW2=Math.min(crop0.x+crop0.w, Math.max(minW2, crop0.w-dx*scale));
+      var deltaCropW=newCropW2-crop0.w; // negative when shrinking from the left
+      c.crop.x=crop0.x-deltaCropW;
+      c.crop.w=newCropW2;
+      // Box width must shrink/grow by the SAME sign as the crop (so the
+      // display scale w/crop.w stays constant, i.e. no stretch) — not the
+      // opposite sign, which previously made the box grow while cropping.
+      var boxDx2=deltaCropW/scale;
+      c.w=Math.max(minBox, S.drag.w0+boxDx2);
+      c.x=S.drag.x0-boxDx2;
+    }
+  } else {
+    var scaleY=S.drag.h0>0?crop0.h/S.drag.h0:1;
+    var dy=snap(pt.y-S.drag.sm.y);
+    if(edge==='bottom'){
+      var maxH=natH-crop0.y;
+      var minH=Math.max(1,minBox*scaleY);
+      var newCropH=Math.min(maxH, Math.max(minH, crop0.h+dy*scaleY));
+      var boxDy=(newCropH-crop0.h)/scaleY;
+      c.crop.h=newCropH; c.h=Math.max(minBox, S.drag.h0+boxDy);
+    } else { // top
+      var minH2=Math.max(1,minBox*scaleY);
+      var newCropH2=Math.min(crop0.y+crop0.h, Math.max(minH2, crop0.h-dy*scaleY));
+      var deltaCropH=newCropH2-crop0.h;
+      c.crop.y=crop0.y-deltaCropH;
+      c.crop.h=newCropH2;
+      // Same sign fix as 'left' above.
+      var boxDy2=deltaCropH/scaleY;
+      c.h=Math.max(minBox, S.drag.h0+boxDy2);
+      c.y=S.drag.y0-boxDy2;
+    }
+  }
+  S.drag.moved=true;
+  renderAll();
+}
+
 function onDragEnd(){
   if(S.drag.moved&&S.drag.target){
     if(S.drag.target.type==='wire-seg'){
@@ -1298,6 +1601,10 @@ function onDragEnd(){
         }
       }
     }
+    // Resize/crop change comp.w/h/crop directly (not through a prop-input
+    // that already keeps itself in sync) — refresh the panel so the Width/
+    // Height fields don't show stale pre-drag values.
+    if(S.drag.target.type==='resize'||S.drag.target.type==='crop')renderProps();
     renderAll();
     pushState();
     saveSchematic();
@@ -1383,7 +1690,16 @@ function copyToBuffer(){
   }
   for(var i=0;i<S.components.length;i++){
     var c=S.components[i];
-    if(selectedIds.comp[c.id]){comps.push({id:c.id,type:c.type,x:c.x,y:c.y,label:c.label,value:c.value,rot:c.rot,mirror:c.mirror});}
+    if(selectedIds.comp[c.id]){
+      // Shallow-copy the whole component (not just a fixed field whitelist) so
+      // type-specific extras — blanket/note w/h/align, image src/crop/natW/H,
+      // text-label style flags — survive copy/paste too. `crop` is deep-cloned
+      // so pasting the same buffer twice never lets two images share (and
+      // fight over) the same crop object.
+      var cc=Object.assign({},c);
+      if(cc.crop)cc.crop=Object.assign({},cc.crop);
+      comps.push(cc);
+    }
   }
   for(var i=0;i<S.wires.length;i++){
     var w=S.wires[i];
@@ -1479,13 +1795,13 @@ function pasteFromBuffer(){
   S.pasteMode.newLabels=computePasteLabels(S.buffer.comps);
   for(var i=0;i<S.buffer.comps.length;i++){
     var oc=S.buffer.comps[i];
-    var nc={id:newId(),type:oc.type,x:oc.x,y:oc.y,label:S.pasteMode.newLabels[i],value:oc.value,rot:oc.rot,mirror:oc.mirror};
+    var nc=Object.assign({},oc,{id:newId(),label:S.pasteMode.newLabels[i]});
     S.pasteMode.compMap[oc.id]=nc.id;
     var g=el('g',{class:'component-group ghost',transform:'translate('+nc.x+','+nc.y+')','data-id':nc.id});
     var inner=el('g',{class:''});
     var xf='';if(nc.rot)xf+='rotate('+nc.rot+')';if(nc.mirror)xf+=(xf?' ':'')+'scale(-1,1)';
     if(xf)inner.setAttribute('transform',xf);
-    CD[nc.type].draw(inner,{label:nc.label,value:nc.value});
+    CD[nc.type].draw(inner,nc);
     g.appendChild(inner);
     lyrO.appendChild(g);
     S.pasteMode.ghostCompEls.push(g);
@@ -1582,8 +1898,10 @@ function cancelPaste(){
 function confirmPaste(dx,dy){
   if(!S.pasteMode.active)return;
   for(var i=0;i<S.pasteMode.ghostCompEls.length;i++){
-    var sp=snp(S.buffer.comps[i].x+dx,S.buffer.comps[i].y+dy);
-    var nc={id:S.pasteMode.compMap[S.buffer.comps[i].id],type:S.buffer.comps[i].type,x:sp.x,y:sp.y,label:S.pasteMode.newLabels[i],value:S.buffer.comps[i].value,rot:S.buffer.comps[i].rot,mirror:S.buffer.comps[i].mirror};
+    var bc=S.buffer.comps[i];
+    var sp=snp(bc.x+dx,bc.y+dy);
+    var nc=Object.assign({},bc,{id:S.pasteMode.compMap[bc.id],x:sp.x,y:sp.y,label:S.pasteMode.newLabels[i]});
+    if(bc.crop)nc.crop=Object.assign({},bc.crop); // don't let two pasted copies share one crop object
     S.components.push(nc);
     S.pasteMode.ghostCompEls[i].remove();
   }
@@ -1695,7 +2013,7 @@ function exportSVG(){
   // remove interactive/overlay elements
   var overlay=clone.querySelector('#lyr-overlay');
   if(overlay)overlay.remove();
-  clone.querySelectorAll('.wire-hit,.hit-rect,.junction-hit,.pin-ring,.ghost').forEach(function(e){e.remove();});
+  clone.querySelectorAll('.wire-hit,.hit-rect,.junction-hit,.pin-ring,.ghost,.resize-handle,.crop-handle').forEach(function(e){e.remove();});
   // remove grid and defs so exported SVG is clean for printing
   var gb=clone.querySelector('#grid-bg'); if(gb) gb.remove();
   var defs=clone.querySelector('defs'); if(defs) defs.remove();
@@ -1795,6 +2113,7 @@ function rotateSelected(){
   for(var i=0;i<S.selected.length;i++){
     var s=S.selected[i];if(s.type!=='comp')continue;
     var comp=S.components.find(function(c){return c.id===s.id;});if(!comp)continue;
+    if(UI_ANNOTATION_TYPES.includes(comp.type))continue; // annotations don't rotate/mirror
     var def=CD[comp.type],oldRot=comp.rot||0,oldMir=comp.mirror||false;
     comp.rot=(oldRot+90)%360;
     rewireComp(comp,def,oldRot,oldMir);
@@ -1807,6 +2126,7 @@ function mirrorSelected(){
   for(var i=0;i<S.selected.length;i++){
     var s=S.selected[i];if(s.type!=='comp')continue;
     var comp=S.components.find(function(c){return c.id===s.id;});if(!comp)continue;
+    if(UI_ANNOTATION_TYPES.includes(comp.type))continue; // annotations don't rotate/mirror
     var def=CD[comp.type],oldRot=comp.rot||0,oldMir=comp.mirror||false;
     comp.mirror=!oldMir;
     rewireComp(comp,def,oldRot,oldMir);
@@ -1866,11 +2186,9 @@ function zoomToFit(){
   }
   var minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
   for(var i=0;i<S.components.length;i++){
-    var c=S.components[i],def=CD[c.type];
-    var rot=c.rot||0,isVert=(rot===90||rot===270);
-    var hw=(isVert?def.hitH:def.hitW)/2,hh=(isVert?def.hitW:def.hitH)/2;
-    if(c.x-hw<minX)minX=c.x-hw;if(c.y-hh<minY)minY=c.y-hh;
-    if(c.x+hw>maxX)maxX=c.x+hw;if(c.y+hh>maxY)maxY=c.y+hh;
+    var cb=compBBox(S.components[i]);
+    if(cb.left<minX)minX=cb.left;if(cb.top<minY)minY=cb.top;
+    if(cb.right>maxX)maxX=cb.right;if(cb.bottom>maxY)maxY=cb.bottom;
   }
   for(var i=0;i<S.wires.length;i++){
     for(var j=0;j<S.wires[i].points.length;j++){
@@ -1889,23 +2207,49 @@ function zoomToFit(){
   applyView();
 }
 
+// ═══ CLIPBOARD PASTE (Ctrl+V) — unified dispatch by content ═══
+// Both the internal buffer-paste (copied components/wires/junctions) and the
+// OS-clipboard image paste are driven from this single 'paste' event, not
+// from the keydown handler: calling preventDefault() on the Ctrl+V *keydown*
+// would suppress the browser's native 'paste' event entirely, which is
+// exactly what broke OS image paste before. So keydown does nothing special
+// for Ctrl+V (see below) and this handler branches on what the clipboard
+// actually contains.
+window.addEventListener('paste',function(e){
+  if(document.activeElement&&(document.activeElement.tagName==='INPUT'||document.activeElement.tagName==='TEXTAREA'))return;
+  var items=e.clipboardData&&e.clipboardData.items;
+  if(items){
+    for(var i=0;i<items.length;i++){
+      if(items[i].type&&items[i].type.indexOf('image/')===0){
+        var file=items[i].getAsFile();
+        if(file){ e.preventDefault(); placeImageFromFile(file,lastMousePt||viewCenterPoint()); }
+        return;
+      }
+    }
+  }
+  // No image on the clipboard — fall back to the internal copy/paste buffer.
+  e.preventDefault();
+  pasteFromBuffer();
+});
+
 // ═══ KEYBOARD ═══
 document.addEventListener('keydown',function(e){
-  if(e.target.tagName==='INPUT')return;
+  if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')return;
   // Undo / Redo shortcuts
   if((e.ctrlKey||e.metaKey) && (e.key==='z' || e.key==='Z')){
     e.preventDefault(); if(e.shiftKey) redo(); else undo(); return;
   }
   if((e.ctrlKey||e.metaKey) && (e.key==='y' || (e.shiftKey && e.key==='Z'))){ e.preventDefault(); redo(); return; }
-  // Copy / Cut / Paste shortcuts
+  // Copy / Cut shortcuts. Paste (Ctrl+V) is intentionally NOT handled here —
+  // see the 'paste' event listener above: preventDefault() on this keydown
+  // would suppress the browser's native paste event, breaking OS-clipboard
+  // image paste.
   if((e.ctrlKey||e.metaKey) && (e.key==='c' || e.key==='C')){
     e.preventDefault(); copyToBuffer(); return; }
   if((e.ctrlKey||e.metaKey) && (e.key==='x' || e.key==='X')){
     e.preventDefault(); cutSelected(); return; }
-  if((e.ctrlKey||e.metaKey) && (e.key==='v' || e.key==='V')){
-    e.preventDefault(); pasteFromBuffer(); return; }
   if(e.key==='Escape'){if(S.pasteMode.active){cancelPaste();}else if(S.mode==='probe'){if(probeState.dragging){probeState.dragging=false;}clearAllProbeHighlights();probeState.active=false;setMode('select');}else{cancelWire();setMode('select');}}
-  if(e.key==='v'||e.key==='V'){if(!S.pasteMode.active)setMode('select');}
+  if(!(e.ctrlKey||e.metaKey) && (e.key==='v'||e.key==='V')){if(!S.pasteMode.active)setMode('select');}
   if(e.key==='w'||e.key==='W')setMode('wire');
   if(e.key==='p'||e.key==='P')setMode('probe');
   if(e.key==='Delete'||e.key==='Backspace')deleteSelected();

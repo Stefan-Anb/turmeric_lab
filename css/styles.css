@@ -52,7 +52,10 @@ body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);displ
 
 #canvas-wrap{flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--bg-deep);min-width:0;}
 #schematic-pane{flex:1;position:relative;overflow:hidden;min-height:80px;}
-#schematic-svg{position:absolute;top:0;left:0;width:100%;height:100%;}
+/* Dragging over an SVG <text> (component labels, wire net labels, text-label
+   elements, ...) would otherwise trigger the browser's native text-selection
+   highlight across the whole canvas instead of our own drag/move logic. */
+#schematic-svg{position:absolute;top:0;left:0;width:100%;height:100%;user-select:none;-webkit-user-select:none;}
 #sim-divider{height:6px;flex-shrink:0;background:var(--border-hi);cursor:row-resize;}
 #sim-divider:hover,#sim-divider.dragging{background:var(--accent-dim);}
 #sim-pane{flex-shrink:0;height:320px;min-height:120px;display:flex;flex-direction:column;background:var(--bg-deep);border-top:1px solid var(--border);overflow:hidden;}
@@ -95,6 +98,44 @@ body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);displ
 .component-group .param-body{stroke-dasharray:5 3;}
 .component-group .pin-dot{fill:var(--comp-stroke);}
 .component-group .hit-rect{fill:transparent;stroke:none;}
+
+/* ─ Blanket: pure background annotation — frame never intercepts clicks,
+   only its title text does (see onBlanketTitleDown / renderBlankets). */
+.blanket-frame{fill:#00c8ff0c;stroke:#3a4a56;stroke-width:1.5;stroke-dasharray:6 4;pointer-events:none;}
+.component-group.selected .blanket-frame{stroke:var(--wire-sel);}
+.blanket-title{fill:var(--text-mid);font-family:'Share Tech Mono',monospace;font-size:14px;pointer-events:all;cursor:move;}
+.component-group.selected .blanket-title{fill:var(--wire-sel);}
+
+/* ─ Image ─ */
+.image-frame{fill:none;stroke:var(--comp-stroke);stroke-width:1;pointer-events:none;}
+.component-group.selected .image-frame{stroke:var(--wire-sel);filter:drop-shadow(0 0 4px var(--wire-sel));}
+
+/* ─ Text label ─ */
+.text-label{fill:var(--text-mid);font-family:'Share Tech Mono',monospace;}
+.component-group.selected .text-label{fill:var(--wire-sel);}
+
+/* ─ Note ─ */
+.note-body{fill:#3a3320;stroke:#5a4f2e;stroke-width:1.5;}
+.component-group.selected .note-body{stroke:var(--wire-sel);filter:drop-shadow(0 0 4px var(--wire-sel));}
+.note-text{font-family:'Share Tech Mono',monospace;font-size:13px;color:var(--text-mid);white-space:pre-wrap;overflow:hidden;pointer-events:none;line-height:1.4;}
+.note-text h1,.note-text h2,.note-text h3{font-family:'Rajdhani',sans-serif;color:var(--text-hi);line-height:1.25;margin:2px 0;}
+.note-text h1{font-size:17px;} .note-text h2{font-size:15px;} .note-text h3{font-size:13px;}
+.note-text ul{margin:2px 0;padding-left:16px;}
+.note-text code{background:#00000040;padding:0 3px;border-radius:2px;color:var(--accent);}
+.note-text strong{color:var(--text-hi);}
+.note-text del{opacity:.6;}
+
+/* ─ Resize / crop handles (blanket + image, only rendered while selected) ─
+   Resize (corner, free w+h resize) is a round accent-blue dot. Crop (image
+   edge midpoints) is deliberately a different shape and color — a small
+   notched bracket, the same "trim this edge" affordance used by crop tools
+   in image editors — so the two are never confused. */
+.resize-handle{fill:var(--accent);stroke:#0a0c0e;stroke-width:1;pointer-events:all;}
+.resize-handle:hover{fill:var(--wire-sel);}
+.crop-handle-bar{fill:var(--node-color);stroke:#0a0c0e;stroke-width:1;pointer-events:none;}
+.crop-handle-tick{stroke:#0a0c0e;stroke-width:1.5;pointer-events:none;}
+.crop-handle-hit{fill:transparent;stroke:none;pointer-events:all;}
+.crop-handle:hover .crop-handle-bar{fill:var(--wire-sel);}
 
 .wire-group .wire-hit{stroke:transparent;stroke-width:16;fill:none;stroke-linecap:square;cursor:pointer;}
 .wire-group .wire-vis{stroke:var(--wire);stroke-width:1.5;fill:none;stroke-linecap:square;pointer-events:none;}

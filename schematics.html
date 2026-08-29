@@ -107,6 +107,19 @@
       <svg class="comp-prev" viewBox="-24 -13 48 26"><rect x="-22" y="-9" width="44" height="18" stroke="#a8c4d8" stroke-width="1.5" stroke-dasharray="4 3" fill="#0f1215"/><text x="0" y="-1" font-size="6.5" fill="#a8c4d8" font-family="monospace" text-anchor="middle">.PARAM</text><text x="0" y="8" font-size="7" fill="#00c8ff" font-family="monospace" font-weight="bold" text-anchor="middle">X=1</text></svg>Parameter
     </button>
     <div id="sidebar-custom-comps"></div>
+    <div class="grp-lbl">Annotations</div>
+    <button class="comp-btn" draggable="true" data-comp="blanket" onclick="selectComp('blanket',event)">
+      <svg class="comp-prev" viewBox="-22 -14 44 28"><rect x="-20" y="-12" width="40" height="24" stroke="#a8c4d8" stroke-width="1.5" stroke-dasharray="4 3" fill="none"/><text x="0" y="-15" font-size="7" fill="#a8c4d8" font-family="monospace" text-anchor="middle">GROUP</text></svg>Blanket
+    </button>
+    <button class="comp-btn" draggable="true" data-comp="textlabel" onclick="selectComp('textlabel',event)">
+      <svg class="comp-prev" viewBox="-22 -14 44 28"><text x="0" y="6" font-size="16" fill="#a8c4d8" font-family="monospace" font-weight="bold" text-anchor="middle">T</text></svg>Text Label
+    </button>
+    <button class="comp-btn" draggable="true" data-comp="note" onclick="selectComp('note',event)">
+      <svg class="comp-prev" viewBox="-22 -14 44 28"><rect x="-16" y="-11" width="32" height="22" stroke="#a8c4d8" stroke-width="1.5" fill="#3a3320"/><line x1="-11" y1="-4" x2="11" y2="-4" stroke="#a8c4d8" stroke-width="1"/><line x1="-11" y1="1" x2="11" y2="1" stroke="#a8c4d8" stroke-width="1"/><line x1="-11" y1="6" x2="4" y2="6" stroke="#a8c4d8" stroke-width="1"/></svg>Note
+    </button>
+    <button class="comp-btn" onclick="insertImageViaFilePicker()">
+      <svg class="comp-prev" viewBox="-22 -14 44 28"><rect x="-18" y="-11" width="36" height="22" stroke="#a8c4d8" stroke-width="1.5" fill="#0f1215"/><circle cx="-9" cy="-3" r="3" stroke="#a8c4d8" stroke-width="1.2" fill="none"/><path d="M-18,7 L-6,-2 L2,5 L9,-1 L18,7" stroke="#a8c4d8" stroke-width="1.5" fill="none"/></svg>Image
+    </button>
     <div style="height:16px"></div>
   </div>
 
@@ -123,6 +136,7 @@
           </pattern>
         </defs>
         <rect id="grid-bg" width="100%" height="100%" fill="url(#grid)"/>
+        <g id="lyr-blankets"></g>
         <g id="lyr-wires"></g>
         <g id="lyr-comps"></g>
         <g id="lyr-junc"></g>

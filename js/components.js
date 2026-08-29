@@ -16,6 +16,46 @@ function AH(p,x1,y1,x2,y2){
   PY(p,`${x2},${y2} ${x2-nx*10+px*4},${y2-ny*10+py*4} ${x2-nx*10-px*4},${y2-ny*10-py*4}`,'comp-body');
 }
 
+// ═══════════════════════════════════════════════════
+// TINY VANILLA MARKDOWN RENDERER (for the Note element)
+// Deliberately minimal — headers, bold/italic/strikethrough/inline code,
+// unordered lists, blank-line paragraph breaks. No tables, links, images,
+// nested lists, etc. Input is HTML-escaped first, so markdown source can
+// never inject markup.
+// ═══════════════════════════════════════════════════
+function renderMiniMarkdown(src){
+  var text=String(src==null?'':src).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  function inline(s){
+    s=s.replace(/`([^`]+)`/g,'<code>$1</code>');
+    s=s.replace(/\*\*([^*]+)\*\*|__([^_]+)__/g,function(m,a,b){return '<strong>'+(a!==undefined?a:b)+'</strong>';});
+    s=s.replace(/\*([^*]+)\*|_([^_]+)_/g,function(m,a,b){return '<em>'+(a!==undefined?a:b)+'</em>';});
+    s=s.replace(/~~([^~]+)~~/g,'<del>$1</del>');
+    return s;
+  }
+  var lines=text.split('\n');
+  var out=[],listOpen=false;
+  function closeList(){ if(listOpen){out.push('</ul>');listOpen=false;} }
+  for(var i=0;i<lines.length;i++){
+    var line=lines[i];
+    var h=line.match(/^(#{1,3})\s+(.*)$/);
+    var li=line.match(/^[-*]\s+(.*)$/);
+    if(h){
+      closeList();
+      var lvl=h[1].length;
+      out.push('<h'+lvl+'>'+inline(h[2])+'</h'+lvl+'>');
+    } else if(li){
+      if(!listOpen){out.push('<ul>');listOpen=true;}
+      out.push('<li>'+inline(li[1])+'</li>');
+    } else {
+      closeList();
+      if(line.trim()==='') out.push('<br>');
+      else out.push('<div>'+inline(line)+'</div>');
+    }
+  }
+  closeList();
+  return out.join('');
+}
+
 // ═══════════════════════════════════════════
 // COMPONENT LIBRARY — static definitions
 // All pin.x/pin.y must be multiples of GRID (20).
@@ -468,6 +508,105 @@ const CD={
       R(g,-55,-20,110,40,'comp-body param-body');
       T(g,0,-27,'.PARAM','comp-label');
       TA(g,0,4,name+' = '+val,'comp-value');
+    }
+  },
+  // ═══ PURE UI ANNOTATION ELEMENTS ═══
+  // These four types are never referenced by netlist.js (no pins, no
+  // type-specific handling there), so they are invisible to the simulation.
+  // Anchor convention: unlike electrical components (anchored at their
+  // center), blanket/image/note are anchored at their TOP-LEFT corner
+  // (x,y), with explicit w/h — this makes corner-resize math a plain
+  // w+=dx/h+=dy instead of having to also shift the center.
+  blanket:{
+    lbl:'BLK',val:'',hitW:400,hitH:300,
+    props:{
+      label:{l:'Title',def:'Group'},
+      w:{l:'Width',def:'400'},h:{l:'Height',def:'300'},
+      // Note: placeComp() defaults an enum prop to options[0] (it ignores
+      // `def` for enums), so the intended default is expressed via ordering.
+      halign:{l:'Title H-Align',type:'enum',options:[{v:'center',l:'Center'},{v:'left',l:'Left'},{v:'right',l:'Right'}]},
+      valign:{l:'Title V-Align',type:'enum',options:[{v:'top',l:'Top'},{v:'bottom',l:'Bottom'}]}
+    },
+    pins:[],
+    draw(g,v){
+      var w=parseFloat(v.w)||400,h=parseFloat(v.h)||300;
+      R(g,0,0,w,h,'blanket-frame');
+      var halign=v.halign||'center',valign=v.valign||'top';
+      var tx=halign==='left'?10:(halign==='right'?w-10:w/2);
+      var anchor=halign==='left'?'start':(halign==='right'?'end':'middle');
+      var ty=valign==='bottom'?h-10:18;
+      var t=el('text',{x:tx,y:ty,'text-anchor':anchor,class:'blanket-title'});
+      t.textContent=v.label||'Group';
+      g.appendChild(t);
+    }
+  },
+  image:{
+    lbl:'IMG',val:'',hitW:200,hitH:150,
+    props:{label:{l:'Name',def:'Image'}},
+    pins:[],
+    draw(g,v){
+      var w=parseFloat(v.w)||200,h=parseFloat(v.h)||150;
+      var natW=v.natW||w,natH=v.natH||h;
+      var crop=v.crop||{x:0,y:0,w:natW,h:natH};
+      if(v.src){
+        var inner=el('svg',{x:0,y:0,width:w,height:h,viewBox:crop.x+' '+crop.y+' '+crop.w+' '+crop.h,preserveAspectRatio:'none'});
+        var imgEl=document.createElementNS('http://www.w3.org/2000/svg','image');
+        // Plain `href` only (SVG2) — an `xlink:href` fallback would need the
+        // schematic-svg root to declare xmlns:xlink, which it doesn't, and
+        // adding the attribute without that declaration breaks exportSVG()'s
+        // XML re-parse on import ("Namespace prefix xlink ... not defined").
+        imgEl.setAttribute('href',v.src);
+        imgEl.setAttribute('x','0');imgEl.setAttribute('y','0');
+        imgEl.setAttribute('width',String(natW));imgEl.setAttribute('height',String(natH));
+        imgEl.setAttribute('preserveAspectRatio','none');
+        inner.appendChild(imgEl);
+        g.appendChild(inner);
+      }
+      R(g,0,0,w,h,'image-frame');
+    }
+  },
+  textlabel:{
+    lbl:'TXT',val:'',hitW:80,hitH:24,
+    props:{
+      label:{l:'Text',def:'Label'},
+      fontSize:{l:'Size',def:'16'},
+      bold:{l:'Bold',type:'bool',def:false},
+      italic:{l:'Italic',type:'bool',def:false},
+      strike:{l:'Strikethrough',type:'bool',def:false}
+    },
+    pins:[],
+    draw(g,v){
+      var t=el('text',{x:0,y:0,class:'text-label'});
+      t.textContent=v.label||'Label';
+      var fs=parseFloat(v.fontSize)||16;
+      t.style.fontSize=fs+'px';
+      t.style.fontWeight=v.bold?'bold':'normal';
+      t.style.fontStyle=v.italic?'italic':'normal';
+      t.style.textDecoration=v.strike?'line-through':'none';
+      g.appendChild(t);
+    }
+  },
+  note:{
+    lbl:'NOTE',val:'',hitW:220,hitH:160,
+    props:{
+      text:{l:'Text (Markdown)',type:'textarea',def:'Notiz'},
+      w:{l:'Width',def:'220'},h:{l:'Height',def:'160'}
+    },
+    pins:[],
+    draw(g,v){
+      var w=parseFloat(v.w)||220,h=parseFloat(v.h)||160;
+      R(g,0,0,w,h,'note-body');
+      var fo=el('foreignObject',{x:6,y:6,width:Math.max(0,w-12),height:Math.max(0,h-12)});
+      var div=document.createElement('div');
+      // Explicit xmlns so exportSVG()'s serialized SVG re-parses correctly as
+      // strict XML on import (importSVG() uses DOMParser in 'image/svg+xml'
+      // mode, which requires HTML content inside <foreignObject> to declare
+      // its namespace explicitly).
+      div.setAttribute('xmlns','http://www.w3.org/1999/xhtml');
+      div.className='note-text';
+      div.innerHTML=renderMiniMarkdown(v.text||'');
+      fo.appendChild(div);
+      g.appendChild(fo);
     }
   }
 };

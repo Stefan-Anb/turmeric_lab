@@ -13,3 +13,16 @@
 * Step Parameter, Multisimulation, Graphenschar im Plot, Auswahl einzelner Graphen, Berechnung von Kennlinien aus Multisimulation
 * alle Platzhalter entfernen oder setzen -> kann verwirren
 * Default range vom PWM-Generator auf 1V
+
+Einbinden der Echtzeit-Simulation (mit Javscript-Code)
+* WASM-Build vom POC einbinden
+* Code-Editor ergänzen
+* Wrapper für Netznamen? -> bestenfalls Auto-Completion
+
+Optimierung der Custom Components
+
+* Verwendbarkeit für Blockschaltbilder
+* Allgemein die Funktion mal testen
+* Spice-Model to Component
+* Löschen von Custom Components
+* Entfernen des Apply-Button, sofortiges Ändern der Symbole

@@ -16,10 +16,10 @@ ohne externe Abhängigkeiten. Eingebunden wird alles statisch über
 
 | Datei | Zeilen | Rolle |
 |-------|-------:|-------|
-| [js/schematic.js](js/schematic.js) | ~181 | Datenmodell `S`, reine Geometrie- und Netz-Logik (kein DOM) |
-| [js/components.js](js/components.js) | ~335 | Bauteilbibliothek `CD`, SVG-Zeichenhelfer, Custom-Components |
-| [js/netlist.js](js/netlist.js) | ~326 | SPICE-Netzlistengenerierung |
-| [js/app.js](js/app.js) | ~2147 | Rendering, Eventhandling, Tools (Wire, Probe, Select), Undo, Copy/Paste, Import/Export, Persistenz |
+| [js/schematic.js](js/schematic.js) | ~182 | Datenmodell `S`, reine Geometrie- und Netz-Logik (kein DOM) |
+| [js/components.js](js/components.js) | ~612 | Bauteilbibliothek `CD` (inkl. der vier UI-Annotationstypen, Kapitel 7), SVG-Zeichenhelfer, Mini-Markdown-Renderer, Custom-Components |
+| [js/netlist.js](js/netlist.js) | ~754 | SPICE-Netzlistengenerierung |
+| [js/app.js](js/app.js) | ~2625 | Rendering, Eventhandling, Tools (Wire, Probe, Select, Resize/Crop), Undo, Copy/Paste, Import/Export, Persistenz |
 | [css/styles.css](css/styles.css) | - | Darstellung |
 
 **Ladeordnung** (relevant, da globale Variablen geteilt werden):
@@ -728,6 +728,197 @@ Wesentliche Punkte:
   KLU-Anbindung) gesondert prüfen, falls Auslieferung geplant ist.
 - `.wasm`-Größe (mehrere MB): Lazy-Load erst bei erstem Simulationsklick.
 - Versions-/API-Drift der WASM-Builds: konkrete Version pinnen.
+
+---
+
+## 7. UI-Annotationselemente: Blanket, Image, Text-Label, Notiz
+
+> **Implementierungsstatus (2026-08-29): umgesetzt.** Vier reine
+> UI-Elemente ohne jede Netzliste-/Simulationsrelevanz: `blanket` (Gruppierungsrahmen
+> mit Titeltext), `image` (eingebettetes Bild, croppable), `textlabel`
+> (einzeiliger Freitext) und `note` (mehrzeilige Notiz mit Markdown). Alle vier
+> sind normale Einträge in `S.components` — Undo/Redo, `saveSchematic`,
+> `exportSVG`/`importSVG` laufen unverändert generisch über dieses Array, da
+> keiner der vier Typen in `netlist.js` referenziert wird (`pins:[]`,
+> kein `if(c.type==='...')`-Zweig).
+
+### 7.1 Datenmodell und Anker-Konvention
+
+Elektrische Bauteile sind an ihrem **Zentrum** verankert (`x,y` = Mittelpunkt,
+Symbol wird relativ dazu gezeichnet). `blanket`, `image` und `note` durchbrechen
+das bewusst und sind an der **oberen linken Ecke** verankert (`x,y` = Ecke,
+explizites `w`/`h`), da das die Resize-Mathematik erheblich vereinfacht (Ecke
+ziehen = `w += dx; h += dy`, kein Verschieben des Zentrums nötig). `textlabel`
+bleibt wie ein Bauteil an einem Punkt verankert (Textursprung), hat aber kein
+`w`/`h` — seine Hitbox wird nach jedem Render live per `text.getBBox()`
+vermessen und in `comp._mx/_my/_mw/_mh` zwischengespeichert (reiner
+Laufzeit-Cache, kein Persistenzfeld im eigentlichen Sinn, wird aber der
+Einfachheit halber mitgespeichert und beim nächsten Render ohnehin überschrieben).
+
+```text
+blanket:   { id, type:'blanket', x, y, w, h, label, halign, valign }
+image:     { id, type:'image',   x, y, w, h, src, natW, natH, crop:{x,y,w,h}, label }
+textlabel: { id, type:'textlabel', x, y, label, fontSize, bold, italic, strike }
+note:      { id, type:'note',    x, y, w, h, text }
+```
+
+Zwei neue Konstanten in [app.js](js/app.js) kapseln diese Sonderfälle generisch:
+`UI_ANNOTATION_TYPES` (alle vier — u. a. verwendet, um Rotation/Spiegelung für
+diese Typen zu unterbinden, siehe 7.2) und `TOPLEFT_BOX_TYPES` (`blanket`,
+`image`, `note`). Eine gemeinsame Hilfsfunktion `compBBox(c)` liefert die
+Weltkoordinaten-Bounding-Box für **jeden** Komponententyp (Ecke+Größe für die
+Box-Typen, gemessene Bbox für `textlabel`, sonst wie bisher zentriert um
+`hitW`/`hitH`) und ersetzt damit die vorher an drei Stellen duplizierte
+hitW/hitH-Logik in `finishSelection`, `renderComps` und `zoomToFit`.
+
+### 7.2 Blanket: immer im Hintergrund, nur am Titel selektierbar
+
+Ein rein visuelles Gruppierungsrechteck für Blockschaltbilder. Zwei
+Anforderungen widersprechen dem generischen Rendering-/Selektionsmodell und
+wurden strukturell statt per Sonderfall-Flag gelöst:
+
+- **Immer im Hintergrund, unabhängig von Einfügereihenfolge.** Statt eine
+  z-Order über die Position in `S.components` zu pflegen, bekommt Blanket einen
+  eigenen SVG-Layer `#lyr-blankets`, der in [schematics.html](schematics.html)
+  strukturell **vor** `#lyr-wires`/`#lyr-comps` liegt. `renderBlankets()`
+  zeichnet ausschließlich `type==='blanket'`-Einträge dorthin;
+  `renderComps()` überspringt sie (`if(comp.type==='blanket')continue;`).
+  Da die Layer-Reihenfolge im DOM fix ist, ist Blanket damit *strukturell*
+  garantiert hinter allem anderen — kein Re-Sortieren nötig.
+- **Nur der Titeltext ist klickbar/verschiebbar, nie die ganze Gruppen-Selektion.**
+  `renderBlankets()` hängt den Drag-Handler (`onBlanketTitleDown`) gezielt nur
+  an das `<text class="blanket-title">`-Element; der Rahmen selbst bekommt
+  `pointer-events:none` (CSS) und keinen Group-Mousedown-Handler — Klicks
+  fallen also zu darunterliegenden Bauteilen durch. Zusätzlich überspringt
+  `finishSelection()` `type==='blanket'` explizit in der Marquee-Schleife, sodass
+  ein Rubber-Band-Aufzug über den ganzen Rahmen das Blanket **nie** mitselektiert
+  (nur enthaltene Bauteile, ohne jede Parent/Child-Beziehung — das Blanket trackt
+  seinen Inhalt bewusst nicht, rein optisch).
+
+Resizable über einen Eck-Handle unten rechts (`addResizeHandle`, nur gerendert
+wenn selektiert), frei in Breite/Höhe (kein Aspect-Ratio-Zwang, anders als
+Image, siehe 7.3). Titel-Ausrichtung (`halign`/`valign`) und Breite/Höhe sind
+zusätzlich als normale Text-Properties editierbar.
+
+### 7.3 Image: nicht-destruktiver Crop und Aspect-Ratio-Resize
+
+Eingebettet als `src` (data-URI, base64), einfügbar über Sidebar-Button
+(File-Picker → `insertImageViaFilePicker()`), Drag&Drop einer Bilddatei auf den
+Canvas (`pane`-`drop`-Handler in `initCompDnD()` erkennt `e.dataTransfer.files`
+vor der Sidebar-Typ-Logik) und Ctrl+V der OS-Zwischenablage (siehe 7.6). Alle
+drei Wege laufen durch `placeImageFromFile()` → `placeImageComp()`.
+
+**Crop-Mechanik.** `crop:{x,y,w,h}` ist der sichtbare Ausschnitt in
+**Originalbild-Pixelkoordinaten**. Gerendert wird ein verschachteltes `<svg>`
+mit `viewBox="crop.x crop.y crop.w crop.h"` und fester `width/height = w/h`
+(Box-Größe); das `<image>`-Kind darin behält immer die vollen `natW`/`natH`. Ein
+verschachteltes `<svg>` clippt seinen Inhalt automatisch auf sein eigenes
+Viewport (SVG-Spezifikation, `overflow:hidden` per Default) — kein manuelles
+`<clipPath>` nötig. `src`/`natW`/`natH` werden nie verändert, nur `crop`
+schrumpft/wächst, geklemmt auf `[0,natW]×[0,natH]` — daher jederzeit bis zum
+Originalbild rückgängig zu machen.
+
+Vier Crop-Handles (Kantenmitten, `onCropMove` in [app.js](js/app.js)) und ein
+Resize-Handle (Ecke unten rechts, `onResizeMove`) teilen sich den bestehenden
+`S.drag`-State-Machine-Mechanismus (`startDrag`/`onDragMove`/`onDragEnd`,
+erweitert um die Target-Typen `'resize'`/`'crop'`). Mathematische Invariante:
+Für jede Kante muss die Anzeige-Skalierung `Box-Größe / Crop-Größe` beim
+Ziehen konstant bleiben (sonst wird das Bild sichtbar gestreckt statt
+beschnitten) — Kern der Formel ist `boxDelta = deltaCrop / scale` mit
+`scale = crop0.{w,h} / box0.{w,h}` zum Zeitpunkt des Drag-Starts.
+
+> **Gefundener und behobener Bug (2026-08-29):** In den Zweigen `edge==='left'`
+> und `edge==='top'` von `onCropMove` stand versehentlich
+> `boxDx2 = -deltaCropW/scale` (Vorzeichen invertiert) statt
+> `boxDx2 = deltaCropW/scale`. Effekt: Ziehen der linken/oberen Kante
+> vergrößerte die Box, statt sie zu verkleinern (während `right`/`bottom`,
+> ohne diese Negation, korrekt funktionierten) — genau umgekehrtes Verhalten
+> zum beabsichtigten Crop. Nach dem Fix skaliert die Box in allen vier
+> Richtungen im Gleichschritt mit dem Crop-Rechteck; die gegenüberliegende
+> Kante bleibt jeweils fix (`c.x`/`c.y` werden nur bei `left`/`top`
+> mitverschoben, damit die rechte/untere Kante an Ort und Stelle bleibt).
+
+**Aspect-Ratio beim Eck-Resize.** `onResizeMove` behandelt `type==='image'`
+gesondert: statt Breite und Höhe unabhängig aus `dx`/`dy` zu berechnen, wird
+das Seitenverhältnis der Box zum Drag-Beginn (`S.drag.w0/S.drag.h0`) fixiert und
+die dominante Zugachse (größere Bewegung von `dx` vs. `dy·ratio`) treibt beide
+Dimensionen proportional. Crop bleibt dabei unverändert — nur die
+Anzeigegröße skaliert gleichmäßig, keine Verzerrung. Blanket und Notiz
+durchlaufen bewusst den ursprünglichen, freien (nicht seitenverhältnistreuen)
+Zweig, da sie keinen Bildinhalt haben, der verzerren könnte.
+
+**Crop- vs. Resize-Handle visuell unterscheidbar.** Beide Handle-Typen sahen
+anfangs identisch aus (Kreis), was in der Praxis zu Fehlgriffen führte. Der
+Eck-Resize-Handle (`addResizeHandle`) bleibt ein runder Punkt in Akzentfarbe;
+die vier Crop-Handles (`addCropHandle`) sind stattdessen gelbe, gekerbte Balken
+quer zur Kante (bewusst am "Kante trimmen"-Symbol aus Bildeditoren orientiert),
+mit einer unsichtbaren, größeren Klickfläche als der sichtbare Balken.
+
+### 7.4 Text-Label und Notiz
+
+**Text-Label** (`CD.textlabel`): einzeiliges `<text>`, Formatierung
+(`fontSize`, `bold`, `italic`, `strike`) direkt als Inline-Styles auf dem
+Element. Verhält sich — anders als Blanket — wie ein ganz normales Bauteil:
+volle Marquee-/Klick-Selektion, normale z-Order, Multi-Drag.
+
+**Notiz** (`CD.note`): mehrzeiliger Text in einem `<foreignObject><div>`
+(automatischer Zeilenumbruch durch den Browser, `white-space:pre-wrap`).
+Grafisch resizable über denselben Eck-Handle-Mechanismus wie Image/Blanket
+(`addResizeHandle`, frei, kein Aspect-Ratio-Zwang).
+
+**Markdown-Rendering.** `renderMiniMarkdown(src)` in
+[components.js](js/components.js) ist ein bewusst minimaler Vanilla-Parser
+(keine Bibliothek): Überschriften `#`/`##`/`###`, `**fett**`/`__fett__`,
+`*kursiv*`/`_kursiv_`, `` `code` ``, `~~durchgestrichen~~`, ungeordnete Listen
+(`-`/`*`) und Leerzeilen als Absatzumbruch. Die Eingabe wird **vor** dem
+Parsen HTML-escaped (`&`,`<`,`>`), sodass Markdown-Quelltext kein Markup
+einschleusen kann — das Ergebnis geht direkt per `innerHTML` in den
+`<div>` der Notiz.
+
+### 7.5 Generische Properties-Panel-Erweiterung: `bool` und `textarea`
+
+`renderProps()` kannte bisher nur `type:'enum'` (Radiobuttons) und einen
+impliziten Freitext-`<input>`-Fallback. Für Notiz-Text (mehrzeilig) und
+Text-Label-Stilflags (Boolean) wurden zwei weitere generische Prop-Typen
+ergänzt, nach demselben "kein Apply-Button, alles live"-Muster wie die
+bestehenden Typen:
+
+- `type:'bool'` → `<input type="checkbox">`, Listener setzt `comp[key]=checkbox.checked`.
+- `type:'textarea'` → `<textarea class="prop-input">`, läuft über denselben
+  generischen `input`-Listener wie einzeilige Text-Properties (keine
+  Sonderbehandlung nötig, da `textarea.value` sich wie `input.value` verhält).
+
+Damit funktionieren beliebige zukünftige Bauteile mit Checkbox- oder
+Mehrzeilen-Properties ohne weiteren Code im Properties-Panel.
+
+### 7.6 Gefundene und behobene Bugs abseits der Kernfeatures
+
+Beim iterativen Testen der vier neuen Elemente traten vier Bugs auf, die alle
+auf Interaktionen mit bereits bestehendem, ungeändertem App-Code
+zurückzuführen waren (nicht auf die neuen Elemente selbst) — dokumentiert hier,
+da sie beispielhaft für den Umgang mit SVG-Text, Formularfeldern und
+`paste`/`keydown`-Interaktion in dieser Codebasis sind:
+
+1. **Native Text-Selektion beim Ziehen von SVG-`<text>`.** Ein Drag, der über
+   ein `<text>`-Element läuft (Bauteil-Label, Wire-Netznamen, Text-Label),
+   löst ohne Gegenmaßnahme die native Browser-Textmarkierung über den ganzen
+   Canvas aus — sichtbar als "alles blau markiert", ohne Auswirkung auf
+   `S.selected`, aber verwirrend. Fix: `user-select:none` auf `#schematic-svg`
+   ([styles.css](css/styles.css)).
+2. **Backspace in einer fokussierten `<textarea>` löschte die ganze
+   Komponente.** Der globale `keydown`-Handler prüfte nur `e.target.tagName
+   ==='INPUT'`, nicht `'TEXTAREA'` — ein Feld, das es vor der Notiz im
+   Properties-Panel schlicht nicht gab. Fix: Guard um `TEXTAREA` erweitert.
+3. **Ctrl+V für OS-Zwischenablage-Bilder wurde vom eigenen Code unterdrückt.**
+   Der bestehende `keydown`-Handler rief für Ctrl+V `e.preventDefault()`
+   gefolgt von `pasteFromBuffer()` (internes Kopier-Clipboard). `preventDefault()`
+   auf dem **Keydown** unterdrückt in Chromium/Firefox aber die
+   Standardaktion des Tastenkombination — und die *ist* das Auslösen des
+   nativen `paste`-Events. Der neue Bild-Paste-Listener bekam das Event also
+   nie zu Gesicht. Fix: Keydown macht bei Ctrl+V nichts mehr; die gesamte
+   Fallunterscheidung ("Bild im Clipboard? → Bild einfügen. Sonst? →
+   `pasteFromBuffer()`") sitzt jetzt zentral im `paste`-Event-Handler.
+4. **Crop-Vorzeichenfehler**, siehe 7.3.
 
 ---
 
