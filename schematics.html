@@ -7,6 +7,7 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🫚</text></svg>">
 <link rel="stylesheet" href="css/styles.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.min.css">
+<link rel="stylesheet" href="css/power-analyzer.css">
 </head>
 <body>
 
@@ -226,6 +227,7 @@
         <button class="sim-fit-btn" onclick="simFitX()" title="Fit the horizontal axis to the data">FIT&nbsp;X</button>
         <button class="sim-fit-btn" onclick="simFitY()" title="Fit the vertical axis to the visible data">FIT&nbsp;Y</button>
         <button class="sim-fit-btn" onclick="showSimPanel()" title="Show the simulation settings in the properties panel">SETTINGS</button>
+        <button class="sim-fit-btn sim-pa-btn" onclick="openPowerAnalyzer()" title="Power analyzer: RMS, power, power factor, Σ three-phase values and phasors of the last transient run">POWER ANALYZER</button>
         <span class="sim-pane-hint">drag to zoom · double-click to reset · hover for values · click to set cursor 1/2</span>
         <button class="modal-close" onclick="toggleSimView()" title="Close simulation">&times;</button>
       </div>
@@ -371,5 +373,8 @@
 <script src="js/netlist.js"></script>
 <script src="js/app.js"></script>
 <script src="js/simulation.js"></script>
+<script src="js/power-analyzer-core.js"></script>
+<script src="js/power-analyzer-ui.js"></script>
+<script src="js/power-analyzer-sim.js"></script>
 </body>
 </html>

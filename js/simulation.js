@@ -626,6 +626,7 @@ function finishRun(result,elapsed,errs,info){
   simStatus('Done: '+result.numPoints+' point(s), '+result.numVariables+' variable(s), '+result.dataType+'.'+
     (elapsed!=null?' ('+fmtEng(elapsed/1000,3,'s')+')':''));
   plotResult(result);
+  if(typeof paNotifyData==='function')paNotifyData();
   endRunUI();
 }
 
@@ -2062,6 +2063,8 @@ function currentProbeTargetAt(x,y){
 // Single click: on a device pin this toggles a CURRENT probe I(dev.pin);
 // anywhere else on a net it toggles the node voltage probe V(net).
 function toggleProbeAt(x,y){
+  // The power analyzer is assigning a channel: the click is its, not the plot's.
+  if(typeof paHandleProbeClick==='function'&&paHandleProbeClick(x,y))return;
   if(!S.probes)S.probes=[];
   var tgt=currentProbeTargetAt(x,y);
   if(tgt){
@@ -2113,6 +2116,7 @@ function selectProbeVector(pr,on){
 // If either endpoint is ground/invalid or both are the same net, it degrades
 // to a single-ended probe of the meaningful node.
 function addDiffProbe(x1,y1,x2,y2){
+  if(typeof paHandleProbeDrag==='function'&&paHandleProbeDrag(x1,y1,x2,y2))return;
   var a=_probeNet(x1,y1); // measured (minuend) - drag START
   var b=_probeNet(x2,y2); // reference (subtrahend) - drag END
   var aOk=a&&a!=='0', bOk=b&&b!=='0';

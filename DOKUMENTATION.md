@@ -1130,6 +1130,105 @@ Speicher (`origin={file,version}`); weicht die Version in der TOML spaeter ab,
 zeigt der Dialog "vX available". Die Bibliothek wird per `fetch()` geladen
 (also nicht ueber `file://`) und vom Deploy-Workflow mit veroeffentlicht.
 
+## 10. Leistungsanalysator PA-4
+
+Ein simuliertes Messgeraet (4 Elemente: Dreiphasengruppe CH1..CH3 plus
+unabhaengiger CH4), das das Ergebnis der letzten Transientenanalyse auswertet.
+Theorie, Formeln, Herstellervergleich (Yokogawa WT, Hioki PW3390, IEEE 1459)
+und Entscheidungen stehen in [PLAN-LEISTUNGSANALYSATOR.md](PLAN-LEISTUNGSANALYSATOR.md);
+hier nur die Code-Architektur.
+
+**Drei Dateien, bewusst entkoppelt** (Ladereihenfolge nach `simulation.js`):
+
+| Datei | Rolle | Kennt TurmericLab? |
+|---|---|---|
+| `js/power-analyzer-core.js` | Messkern `PowerAnalyzer.Instrument`: Sync (Schmitt-Trigger auf Nulldurchgaengen), Messintervalle, Grundgroessen, Grundschwingungs-DFT, Mittelung, Σ-Formeln, Bereiche/OVR | nein, kein DOM, laeuft auch in Node/Worker |
+| `js/power-analyzer-ui.js` | Modaler Dialog (`PowerAnalyzer.createUI`): Bedienleiste, Tabelle, Wellenform-/Trend-Plot (uPlot), Zeigerdiagramm, Kanalzuordnung | nein, nur ueber das Datenquellen-Interface |
+| `js/power-analyzer-sim.js` | Datenquelle auf Basis von `simLastResult`/`S.probes`/Formeln, Probe-Weiterleitung, Persistenz | ja (Glue) |
+| `js/power-analyzer-worker.js` | Web Worker: `Instrument.run()` fuer grosse Datensaetze (laedt nur den Kern per `importScripts`) | nein |
+
+Styles in `css/power-analyzer.css` (Praefix `.pa-`, faellt auf die
+TurmericLab-Variablen zurueck, wenn vorhanden).
+
+**Datenquellen-Interface** (das, was spaeter eine echte Hardware-Anbindung
+implementieren wuerde): `listSignals(kind)`, `acquire(cfg)` →
+`{rec, fs, maxStep, warnings}` oder `{error}`, optional `beginPick`/`endPick`
+(interaktive Zuordnung), `suggestChannels()`, `hasSignal(id)`. Ein Record ist
+**aequidistant** abgetastet (`{t0, dt, n, u[4], i[4]}`); `acquire()` resampelt
+dafuer die adaptiven ngspice-Zeitschritte linear auf die Geraete-Abtastrate.
+Der Kern selbst ist blockweise ausgelegt (`append()`/`flush()`), die Simulation
+speist nur alles in einem Block ein.
+
+**Ergebnis-Konvention:** `values['<Groesse>:<Spalte>']`, Spalte `1`..`4` oder
+`S` fuer Σ, Groessen-Katalog in `PowerAnalyzer.QUANTITIES`. Die UI rendert nur
+aus dieser Map, damit auch reine Messwert-Quellen (SCPI liefert fertige
+Numerik) angeschlossen werden koennen.
+
+**Signal-IDs** in der Kanalzuordnung (persistiert, stabil ueber Laeufe):
+`v:<net>`, `vd:<a>|<b>`, `ip:<compId>:<pinIdx>` (gleiche Vorzeichenlogik wie
+der Strom-Probe des Plots, `resolveCurrentProbe()`), `vec:<name>`,
+`f:<Formelname>`. Formeln sind hier erlaubt (anders als bei `.measure`), weil
+die Auswertung clientseitig laeuft.
+
+**Haken in den bestehenden Dateien** (alle per `typeof`-Guard, die App laeuft
+auch ohne die PA-Dateien):
+
+- `toggleProbeAt()`/`addDiffProbe()`: zuerst `paHandleProbeClick/-Drag()`.
+  Waehrend der Zuordnung gehoert der Klick dem Analysator, die Plot-Probes
+  bleiben unberuehrt. Im Spannungsmodus zaehlt immer das Netz (auch auf einem
+  Pin), im Strommodus nur ein Bauteil-Pin.
+- `finishRun()` → `paNotifyData()`: offener Dialog wertet neu aus.
+- Globaler `keydown`-Guard → `paIsModal()`: keine Editor-Kuerzel hinter dem
+  Dialog. Im Zuordnungsmodus (Dialog zur Leiste eingeklappt) sind sie aktiv.
+- `collectState()`/`applyState()` → `sim.powerAnalyzer`. Ein Schematic ohne
+  eigene Analysator-Konfiguration verwirft die Kanalzuordnung (Netze/Bauteile
+  des vorherigen Schematics), behaelt aber die Geraeteeinstellungen.
+  Zusaetzlich liegt die Konfiguration global in `localStorage['pa_config']`.
+
+**Phase-4-Funktionen** (alle im Kern, Bedienung im Setup- und Harmonics-Tab):
+
+- *Harmonische:* Jedes synchronisierte Intervall wird auf Np Punkte pro
+  Periode umgetastet (PLL-Abtastung, Np = Zweierpotenz ≥ 4·(Ordnung+1)),
+  danach eine DFT je Ordnung 0..N (Standard N = 50, max. 100). Die Zeiger
+  werden um k·φref gedreht, damit sie ueber Intervalle mittelbar sind
+  (Konvention φ(k) − k·φ(1), Kosinus-Bezug). Gemittelt wird wie am Geraet nur
+  exponentiell. THD kommt dann aus den Ordnungen 2..N, ohne Harmonische
+  breitbandig aus Urms, Udc und U(1). Anzeige ueber `PowerAnalyzer.harmonics(prim, 'U'|'I'|'P', e)`.
+- *Energie-Integration:* laeuft kontinuierlich vom Integrationsstart bis zu
+  jedem Anzeige-Update (`_integrate()`), unabhaengig von den Messintervallen
+  und nicht gemittelt: WP, WP+, WP−, q, q+, q−, Integrationszeit; Σ als Summe
+  der Elemente, die auch in PΣ eingehen.
+- *Realistischer Eingang* (`cfg.adc`, standardmaessig aus): Tiefpass 1. Ordnung,
+  Rauschen (fester Seed, also reproduzierbar, auch im Worker), Begrenzung auf
+  ±CF·Bereich und Quantisierung. Greift in `prepare()`, also vor allen
+  Berechnungen und auch fuer die Wellenformanzeige.
+- *Quadratische RMS-Mittelung* (`cfg.avg.rmsQuad`): mittelt U², I² statt U, I.
+- *Worker:* ab 1 Mio. Abtastwerten (Signale × Samples) rechnet
+  `power-analyzer-worker.js`; die Seite haengt die gelieferte Historie mit
+  `Instrument.attach()` an eine eigene Instanz, die die vorbereiteten Samples
+  fuer Wellenform, Cursor und Cursorfenster haelt. Ein neuer Auftrag beendet
+  einen laufenden; schlaegt der Worker fehl (z.B. ohne HTTP-Server), wird
+  synchron gerechnet.
+
+**Test:** `node poc/pa-core-test.js` prueft den Kern gegen die
+Referenzfaelle aus dem Plan (Sinus an R, RL/RC, Verzerrung, symmetrische und
+unsymmetrische Drehstromlast in 3P4W/3P3W/3V3A, DC-Kanal mit Wirkungsgrad,
+Mittelung, Betrieb ohne Sync, Harmonische, Energie, quadratische Mittelung,
+ADC-Stufe, `attach()`).
+
+**Stolpersteine:**
+
+- Simulationen starten und enden oft exakt auf einem Nulldurchgang. Der
+  Schmitt-Trigger laeuft deshalb ab Datenbeginn (Nulldurchgaenge vor `tStart`
+  werden erst bei der Intervallbildung verworfen), und ein steigender
+  Nulldurchgang am ersten bzw. letzten Sample wird per Extrapolation
+  erkannt. Sonst fehlen erste und letzte Periode.
+- Die Frequenz pro Kanal (`fU`, `fI`) braucht mindestens zwei Nulldurchgaenge;
+  ihr Torfenster reicht deshalb zwei Intervalllaengen zurueck.
+- uPlot-Legenden sind direkt nach dem Erzeugen kurzzeitig sehr hoch; die
+  CSS-Kappung (`max-height:44px`) macht die Plotgroesse unabhaengig vom
+  Layout-Zeitpunkt.
+
 ## Quellen (NGSpice / WASM)
 
 - Ngspice User's Manual v46 (HTML): <https://ngspice.sourceforge.io/docs/ngspice-html-manual/manual.xhtml>

@@ -31,6 +31,7 @@ globalen Scope teilen):
 
 ```
 js/components.js → js/schematic.js → js/netlist.js → js/app.js → js/simulation.js
+  → js/power-analyzer-core.js → js/power-analyzer-ui.js → js/power-analyzer-sim.js
 ```
 
 | Datei | Rolle |
@@ -40,7 +41,11 @@ js/components.js → js/schematic.js → js/netlist.js → js/app.js → js/simu
 | `js/netlist.js` | SPICE-Netzlistengenerierung |
 | `js/app.js` | Rendering, Events, Tools, Undo, Copy/Paste, Import/Export, Persistenz |
 | `js/simulation.js` | NGSpice-WASM-Anbindung, Plot (uPlot) |
-| `css/styles.css` | Styling |
+| `js/power-analyzer-core.js` | Leistungsanalysator: Messkern, portabel (kein DOM, keine App-Globals) |
+| `js/power-analyzer-ui.js` | Leistungsanalysator: Dialog, portabel (nur Core + Datenquellen-Interface) |
+| `js/power-analyzer-sim.js` | Leistungsanalysator: Anbindung an Simulation/Probes (TurmericLab-Glue) |
+| `js/power-analyzer-worker.js` | Leistungsanalysator: Web Worker für große Datensätze (nicht per `<script>` geladen) |
+| `css/styles.css` | Styling (`css/power-analyzer.css` für den Analysator) |
 
 Globaler Zustand statt Module/Klassen: `S` (Schaltplandaten), `CD`
 (Bauteildefinitionen), `view`/`undoStack`/UI-States in `app.js`. Kapselung ist
@@ -58,7 +63,8 @@ python .claude/serve.py 8765
 ```
 
 oder über die Preview-Tooling-Konfiguration `.claude/launch.json` (Eintrag
-`"schematic"`, Port 8765). Es gibt keine automatisierten Tests — Verifikation
+`"schematic"`, Port 8765). Automatisierte Tests gibt es nur für den Analysator-Kern
+(`node poc/pa-core-test.js`, siehe DOKUMENTATION.md Kapitel 10), sonst erfolgt die Verifikation
 erfolgt manuell im Browser (Platzieren, Selektieren, Ziehen, Undo/Redo,
 Export/Import-Roundtrip, `NETLIST`-Button für die generierte Netzliste
 prüfen).

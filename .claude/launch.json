@@ -8,6 +8,12 @@
       "port": 8765
     },
     {
+      "name": "schematic-alt",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [".claude/serve.py", "8766"],
+      "port": 8766
+    },
+    {
       "name": "ngspice-poc",
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "8000", "--directory", "poc"],

@@ -2053,7 +2053,8 @@ function collectState(){
       formulas:(typeof simFormulas!=='undefined')?simFormulas:undefined,
       directives:simDirEl?simDirEl.value:'',
       saveAll:(typeof getRawMode==='function')?getRawMode():undefined,
-      probes:S.probes||[]
+      probes:S.probes||[],
+      powerAnalyzer:(typeof paConfig!=='undefined'&&paConfig)?paConfig:undefined
     }
   };
 }
@@ -2090,6 +2091,7 @@ function applyState(state,opts){
     var saveAllEl=document.getElementById('sim-raw-mode');
     if(saveAllEl&&typeof sim.saveAll==='boolean')saveAllEl.checked=sim.saveAll;
     if(Array.isArray(sim.probes))S.probes=sim.probes;
+    if(typeof paApplyStateConfig==='function')paApplyStateConfig(sim.powerAnalyzer);
     // A schematic that carries probes plots exactly those (probing takes over
     // from the automatic "all node voltages" set); without probes it stays auto.
     if(typeof simSelectionAuto!=='undefined')simSelectionAuto=!(S.probes&&S.probes.length);
@@ -2401,6 +2403,7 @@ window.addEventListener('paste',function(e){
 document.addEventListener('keydown',function(e){
   if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')return;
   if(libraryOpen())return; // library dialog is modal: no editor shortcuts behind it
+  if(typeof paIsModal==='function'&&paIsModal())return; // same for the power analyzer
   // Undo / Redo shortcuts
   if((e.ctrlKey||e.metaKey) && (e.key==='z' || e.key==='Z')){
     e.preventDefault(); if(e.shiftKey) redo(); else undo(); return;

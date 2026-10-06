@@ -332,6 +332,7 @@ body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);displ
 
 /* ═══ PLOT: fit buttons and value tooltip ═══ */
 .sim-fit-btn{background:var(--bg-card);border:1px solid var(--border);border-radius:3px;color:var(--text-mid);font-family:'Rajdhani',sans-serif;font-size:10px;font-weight:700;letter-spacing:1px;padding:3px 8px;cursor:pointer;transition:all .15s;flex:none;}
+.sim-pa-btn{color:var(--accent);border-color:var(--accent-dim);}
 .sim-fit-btn:hover{border-color:var(--accent);color:var(--accent);background:#00c8ff12;}
 .sim-tooltip{position:absolute;z-index:20;pointer-events:none;background:#0a0c0eee;border:1px solid var(--border-hi);border-radius:3px;padding:5px 7px;font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--text-hi);white-space:nowrap;box-shadow:0 2px 10px #000a;}
 .sim-tip-x{color:var(--text-mid);border-bottom:1px solid var(--border);margin-bottom:3px;padding-bottom:3px;}
