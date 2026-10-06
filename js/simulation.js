@@ -179,9 +179,21 @@ function measureAnalysisKeyword(){
   return (t==='tran'||t==='dc'||t==='ac')?t:null;
 }
 
+// The plot names device-current vectors "i(@l1[i])", but ngspice's .measure only
+// knows the bare "@l1[i]" form (the i(...) wrapper makes it fail silently, so
+// the measurement never prints a result). Unwrap before writing the directive.
+function measureSigForSpice(s){
+  return String(s==null?'':s).replace(/\b[iv]\(\s*(@[^()\s]*\[[^\]]*\])\s*\)/gi,'$1');
+}
+
 function buildMeasureLine(m){
   var kw=measureAnalysisKeyword();
   if(!kw||!m||!m.name)return '';
+  m=JSON.parse(JSON.stringify(m));
+  ['findAt.expr','findWhen.expr','findWhen.whenSig','trigTarg.trigSig','trigTarg.targSig','stat.sig'].forEach(function(f){
+    var p=f.split('.');
+    if(m[p[0]]&&m[p[0]][p[1]])m[p[0]][p[1]]=measureSigForSpice(m[p[0]][p[1]]);
+  });
   var name=m.name;
   if(m.kind==='find_at'){
     var fa=m.findAt||{};

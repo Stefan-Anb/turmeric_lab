@@ -347,7 +347,7 @@ const CD={
   },
   capacitor:{
     lbl:'C',val:'100n',hitW:100,hitH:50,
-    props:{label:{l:'Reference'},value:{l:'Value'}},
+    props:{label:{l:'Reference'},value:{l:'Value'},esr:{l:'Serienwiderstand (Ω)'}},
     pins:[{x:0,y:-40,n:'A'},{x:0,y:40,n:'B'}],
     draw(g,v){
       const ig=el('g',{transform:'rotate(90)'});g.appendChild(ig);
@@ -374,7 +374,7 @@ const CD={
   },
   inductor:{
     lbl:'L',val:'10µH',hitW:100,hitH:40,
-    props:{label:{l:'Reference'},value:{l:'Value'}},
+    props:{label:{l:'Reference'},value:{l:'Value'},esr:{l:'Serienwiderstand (Ω)'}},
     pins:[{x:-40,y:0,n:'A'},{x:40,y:0,n:'B'}],
     draw(g,v){
       L(g,-40,0,-20,0,'comp-pin');

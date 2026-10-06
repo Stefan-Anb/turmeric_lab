@@ -378,12 +378,18 @@ function pwmGenSubckt(name,c){
   var dt=String(c.pwm_deadtime||'0').trim();
   var hasDt=!!dt&&parseFloat(dt)!==0;
   var dv=hasDt?('('+dt+'*'+f+'*'+range+')'):'0';
+  var eps='(10n*'+f+'*'+range+')'; // Flankenbreite 10 ns, in Saegezahn-Spannung umgerechnet
   return [
     '* PWM generator + half-bridge drive ('+name+'), dead time '+(hasDt?dt+'s':'off'),
     '.subckt '+name+' IN OUTH COMH OUTL COML',
     'Bsaw  saw  0 v = (time - floor(time*'+f+')/'+f+') * '+range+' * '+f,
-    'Bouth OUTH COMH v = (v(saw) > '+dv+' && v(saw) < v(IN)) ? '+vhigh+' : '+vlow,
-    'Boutl OUTL COML v = (v(saw) > (v(IN) + '+dv+')) ? '+vhigh+' : '+vlow,
+    // Flanken als 10-ns-Rampen statt harter ?:-Spruenge: unstetige B-Quellen
+    // treiben den Solver am Gate (Cgs/Cgd) auf "timestep too small".
+    // Ausgang H: Rampe auf bei saw>dv, ab bei saw>IN. Ausgang L: Rampe auf bei
+    // saw>IN+dv, ab kurz vor dem Saegezahn-Reset (saw=range), damit der Reset
+    // selbst keinen Sprung am Ausgang erzeugt.
+    'Bouth OUTH COMH v = '+vlow+' + ('+vhigh+'-('+vlow+')) * min(max((v(saw)-'+dv+')/'+eps+',0),1) * min(max((v(IN)-v(saw))/'+eps+',0),1)',
+    'Boutl OUTL COML v = '+vlow+' + ('+vhigh+'-('+vlow+')) * min(max((v(saw)-v(IN)-'+dv+')/'+eps+',0),1) * min(max(('+range+'-v(saw))/'+eps+',0),1)',
     '.ends '+name
   ];
 }
@@ -1095,6 +1101,15 @@ function generateNetlist(opts){
       nets.push(netName);
     }
     var val=c.value||def.val;
+    // Optionaler Serienwiderstand (ESR bei C, DCR bei L): eigener Widerstand
+    // zwischen Pin B und einem internen Knoten. @ref[i] bleibt der Bauteilstrom.
+    var esr=(c.type!=='resistor')?String(c.esr==null?'':c.esr).trim():'';
+    if(esr&&!(/^[+-]?0*\.?0*$/.test(esr))){
+      var mid='n_'+ref+'_esr';
+      lines.push(ref+' '+nets[0]+' '+mid+' '+val);
+      lines.push('R'+ref+'_esr '+mid+' '+nets[1]+' '+esr);
+      continue;
+    }
     var line=ref+' '+nets[0]+' '+nets[1]+' '+val;
     lines.push(line);
   }
