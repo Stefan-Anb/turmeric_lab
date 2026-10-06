@@ -3280,3 +3280,20 @@ function copyNetlist(){
   document.execCommand('copy');
   hint('Netlist copied to clipboard');
 }
+// ═══ SIDEBAR: collapsible sections ═══
+// Quick Access (data-pinned) is always open; the other sections form an
+// accordion (at most one open at a time).
+function initSidebarSections(){
+  var secs=Array.prototype.filter.call(document.querySelectorAll('#sidebar .sb-sec'),function(s){return !s.hasAttribute('data-pinned');});
+  function open(sec){
+    secs.forEach(function(s){s.classList.toggle('open',s===sec&&!s.classList.contains('open'));});
+  }
+  secs.forEach(function(sec){
+    var head=sec.querySelector('.sb-toggle');
+    head.addEventListener('click',function(){open(sec);});
+    head.addEventListener('keydown',function(e){
+      if(e.target===head&&(e.key==='Enter'||e.key===' ')){e.preventDefault();open(sec);}
+    });
+  });
+}
+initSidebarSections();
