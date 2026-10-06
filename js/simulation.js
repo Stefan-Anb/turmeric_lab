@@ -252,7 +252,13 @@ function simLog(msg,isErr){
 // The status now lives in the compact toolbar strip, so long messages (errors,
 // the watchdog notice) get truncated by CSS — the full text stays reachable
 // as a native tooltip.
-function simStatus(msg){var elx=document.getElementById('sim-status');if(elx){elx.textContent=msg;elx.title=msg;}}
+// `pct` (0..100) fills the status strip like a progress bar; omitted = no bar.
+function simStatus(msg,pct){
+  var elx=document.getElementById('sim-status');
+  if(!elx)return;
+  elx.textContent=msg;elx.title=msg;
+  elx.style.setProperty('--pct',(pct>0?Math.min(100,pct):0)+'%');
+}
 
 // ═══ SIMULATION WORKER (with a same-thread fallback) ═══
 // The engine (load + setNetList + runSim) normally lives entirely in
@@ -328,8 +334,18 @@ function startSimTicker(){
   var t0=simRunT0||(typeof performance!=='undefined'?performance.now():Date.now());
   simTicker=setInterval(function(){
     var now=(typeof performance!=='undefined'?performance.now():Date.now());
-    var step=(simPlan&&simPlan.runs.length>1)?' step '+(simPlan.i+1)+'/'+simPlan.runs.length:'';
-    simStatus('Simulating'+step+'… ('+fmtEng((now-t0)/1000,2,'s')+')');
+    var plan=simPlan,n=plan?plan.runs.length:1;
+    if(!plan||n<2){simStatus('Simulating… ('+fmtEng((now-t0)/1000,2,'s')+')');return;}
+    // The engine reports no progress inside a run, so the sweep's progress is
+    // the finished runs plus a guess for the running one from the average
+    // duration of the finished ones (capped below 100 % until it returns).
+    var durs=plan.durs||[],avg=durs.length?durs.reduce(function(a,b){return a+b;},0)/durs.length:0;
+    var cur=avg?Math.min(0.99,(now-(plan.runT0||now))/avg):0;
+    var frac=(plan.i+cur)/n;
+    var eta=avg?Math.max(0,(n-plan.i-cur)*avg):0;
+    var lbl=plan.runs[plan.i]&&plan.runs[plan.i].label;
+    simStatus('Step '+(plan.i+1)+'/'+n+' · '+Math.floor(frac*100)+' %'+
+      (eta?' · ~'+fmtEng(eta/1000,2,'s')+' left':'')+' · '+fmtEng((now-t0)/1000,2,'s')+(lbl?' · '+lbl:''),frac*100);
   },200);
 }
 function stopSimTicker(){
@@ -346,8 +362,9 @@ function simWorkerHandleMessage(msg){
   // newer run (or a watchdog-triggered worker restart) has already taken over.
   if(msg.token!==undefined&&msg.token!==simRunToken)return;
   if(msg.type==='status'){
-    simStatus(msg.message);
-    if(msg.message==='Simulating…')startSimTicker();
+    // inside a sweep the ticker already shows step/percent — don't flash over it
+    if(!(simPlan&&simPlan.runs.length>1&&simTicker))simStatus(msg.message);
+    if(msg.message==='Simulating…'&&!(simPlan&&simPlan.runs.length>1&&simTicker))startSimTicker();
     return;
   }
   if(msg.type==='result'){
@@ -514,8 +531,9 @@ function buildFullNetlist(paramValues){
   // Terminal currents (@dev[i], @q1[ic], …) only reach the raw output when they
   // are saved explicitly; ask for them as soon as a current probe, a formula
   // referencing one, or the "save all signals" option is in play.
-  if(needsCurrents())lines.push(buildSaveLine());
   var analysis=buildAnalysisDirective();
+  var isAc=/^\s*\.ac\b/im.test(analysis+'\n'+directives);
+  if(needsCurrents())lines.push(buildSaveLine(isAc));
   if(analysis)lines.push(analysis);
   var options=buildOptionsDirective();
   if(options)lines.push(options);
@@ -654,6 +672,7 @@ function stepLabel(assign){
 function dispatchPlanRun(token){
   var run=simPlan.runs[simPlan.i];
   simRunPending={token:token,netlist:run.netlist};
+  simPlan.runT0=(typeof performance!=='undefined'?performance.now():Date.now());
   // A fatal ngspice error (e.g. an unknown function in a B-source) can abort
   // the engine without ever posting a reply, which would leave the UI stuck
   // on "Simulating…" forever. The watchdog reports that and — when the engine
@@ -699,6 +718,7 @@ function onEngineResult(result,elapsed,errs,info){
     return;
   }
   plan.done.push({assign:run.assign,label:run.label,result:result,info:info||''});
+  (plan.durs=plan.durs||[]).push((typeof performance!=='undefined'?performance.now():Date.now())-plan.runT0);
   simLog('step '+(plan.i+1)+'/'+plan.runs.length+': '+run.label+' — '+result.numPoints+' point(s)');
   plan.i++;
   if(plan.i<plan.runs.length){

@@ -22,7 +22,7 @@ body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);displ
 /* Run + status + Simulation, grouped and pinned to the toolbar's right edge —
    the whole entry point into the simulation view lives in one place. */
 .tb-sim-group{margin-left:auto;display:flex;align-items:center;gap:8px;}
-.sim-status-compact{font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--text-mid);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;}
+.sim-status-compact{font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--text-mid);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:340px;}
 .tb-btn-run{border-color:var(--accent-dim);}
 .tb-btn-run:disabled{opacity:.5;cursor:default;pointer-events:none;}
 .tb-run-icon{font-size:10px;line-height:1;}
@@ -441,3 +441,6 @@ body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);displ
 #measure-report-body .u-legend{color:var(--text-mid);font-family:'Share Tech Mono',monospace;font-size:11px;}
 .sim-plot .u-legend{max-height:96px;overflow-y:auto;}
 .report-section ~ .report-table th{position:static;}
+
+/* progress fill of the simulation status strip (set via --pct in simStatus) */
+.sim-status-compact{background:linear-gradient(90deg,#00c8ff33 var(--pct,0%),transparent var(--pct,0%));}

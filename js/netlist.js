@@ -602,12 +602,20 @@ function pickModel(part,fallback,userModels,notes,ref){
 // built from the schematic instead — only terminals that actually exist.
 // `all` covers the node voltages plus the branch currents of every voltage and
 // behavioural source, including the ones inside our subcircuits.
-function buildSaveVectors(){
+// `acOnly`: in .ac this WASM build hangs on *every* `@dev[...]` vector (R, C, L,
+// semiconductors alike: "vector @c1[i] is not available" -> "no writable vector
+// found" -> never returns). Only `i(Vsrc)` is accepted there, so nothing else is
+// requested.
+function buildSaveVectors(acOnly){
   var refMap=buildSpiceRefMap();
   var out=[];
   for(var i=0;i<S.components.length;i++){
     var c=S.components[i],t=c.type,ref=refMap[c.id];
     if(!ref)continue;
+    if(acOnly){
+      if((t==='source'||t==='vcc')&&ref.charAt(0).toUpperCase()==='V')out.push('i('+ref+')');
+      continue;
+    }
     if(t==='resistor'||t==='capacitor'||t==='inductor'||t==='sw'){out.push('@'+ref+'[i]');continue;}
     if(t==='transformer'){var traf=ref.toLowerCase();out.push('@l'+traf+'p[i]','@l'+traf+'s[i]');continue;}
     if(t==='diode'||t==='led'||t==='zener'){out.push('@'+ref+'[id]');continue;}
@@ -626,8 +634,8 @@ function buildSaveVectors(){
   return out;
 }
 
-function buildSaveLine(){
-  var v=buildSaveVectors();
+function buildSaveLine(acOnly){
+  var v=buildSaveVectors(acOnly);
   return '.save all'+(v.length?' '+v.join(' '):'');
 }
 
