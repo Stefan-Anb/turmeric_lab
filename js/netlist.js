@@ -255,7 +255,9 @@ function currentVectorsForPin(comp,pinIdx){
   }
   if(t==='source'){
     // i(Vx) is positive for current flowing into the + terminal (pin 0).
-    return res(['i('+ref+')','@'+ref+'[i]'],pinIdx===0?1:-1);
+    // An independent I source has no "i" parameter (its current is "current").
+    var srcCands=ref.charAt(0)==='i'?['@'+ref+'[current]']:['i('+ref+')','@'+ref+'[i]'];
+    return res(srcCands,pinIdx===0?1:-1);
   }
   if(t==='npn'||t==='pnp'){
     var bjt=['ib','ic','ie'][pinIdx]; // pins: B, C, E
@@ -614,7 +616,9 @@ function buildSaveVectors(){
     if(t==='nmos'||t==='pmos'){out.push('@'+ref+'[id]','@'+ref+'[ig]','@'+ref+'[is]');continue;}
     if(t==='source'||t==='vcc'){
       var first=ref.charAt(0).toUpperCase();
-      out.push((first==='I'||first==='G'||first==='B')?('@'+ref+'[i]'):('i('+ref+')'));
+      // Independent I sources only know "current"; asking for "i" on them makes
+      // ngspice abort the raw output and the WASM build then never returns.
+      out.push(first==='I'?('@'+ref+'[current]'):(first==='G'||first==='B')?('@'+ref+'[i]'):('i('+ref+')'));
       continue;
     }
     // scr / pwmgen / custom subcircuits: their internal sources are covered by `all`

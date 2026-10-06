@@ -13,3 +13,4 @@ Einbinden der Echtzeit-Simulation (mit Javscript-Code)
 * Code-Editor ergänzen
 * Wrapper für Netznamen? -> bestenfalls Auto-Completion
 
+* Batch-Download der Internal Library
