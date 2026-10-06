@@ -1677,6 +1677,10 @@ function plotResult(result){
   simYFit=null;simYFit2=null;
   simPlot=new uPlot(opts,data,container);
   resizeSimPlot();   // the legend sits below the canvas — shrink the canvas to fit
+  // The legend's height isn't settled yet right after creation (measured too
+  // tall, which collapsed the canvas to its 60px minimum) — measure again once
+  // the browser has laid it out.
+  requestAnimationFrame(function(){if(simPlot)resizeSimPlot();});
   // Double-click is uPlot's "reset zoom" — drop the manual vertical fit and the
   // measurement cursors too.
   container.addEventListener('dblclick',function(){
