@@ -1017,6 +1017,45 @@ Ohne passendes Modell (oder bei Pin-Anzahl-Mismatch) bleibt der Fallback über
 
 ---
 
+## 9. Schematic-Dateien: interne und globale Bibliothek
+
+**Intern (Browser-Storage).** Mehrere Schematics liegen parallel in
+`localStorage`: `schematic_files` (Index `[{id,name,modified,origin?}]`),
+`schematic_file_<id>` (voller Zustand im Format von `collectState()`, also
+inkl. Simulations-Setup) und `schematic_current_file`. Autosave
+(`saveSchematic()`) schreibt nur den Key der aktuellen Datei. Das alte
+Einzel-Autosave `schematic_state` wird beim Start einmalig migriert.
+`collectState()`/`applyState()` sind die gemeinsame Basis fuer SVG-Export,
+Autosave und Dateiwechsel.
+
+- LOAD legt die Datei unter ihrem Dateinamen als neue interne Datei an.
+- NEW SCHEMATIC (frueher CLEAR) legt eine leere interne Datei an, die alte
+  bleibt erhalten.
+- Download einer **nicht** aktuellen internen Datei: `downloadInternalFile()`
+  tauscht den Zustand kurz ein, exportiert (die Zeichnung kommt aus dem
+  Live-Canvas) und stellt Editor-Zustand, Undo-Stack und View danach wieder her.
+
+**Global (Projekt).** `library/library.toml` beschreibt die Vorlagen,
+die SVGs liegen daneben in `library/`. Format:
+
+```toml
+[library]
+name = "..."
+version = "1.0.0"      # Gesamtversion, bei jeder Aenderung erhoehen
+
+[[schematic]]
+file = "rc_lowpass.svg"
+name = "RC Low-Pass Filter"
+description = "..."
+version = "1.0.0"      # bei Aenderung dieses Schematics erhoehen
+```
+
+`parseTOML()` in `js/app.js` versteht nur diese Teilmenge (Kommentare, Tabellen,
+`[[Arrays]]`, Strings/Zahlen/Bools). OPEN kopiert eine Vorlage in den internen
+Speicher (`origin={file,version}`); weicht die Version in der TOML spaeter ab,
+zeigt der Dialog "vX available". Die Bibliothek wird per `fetch()` geladen
+(also nicht ueber `file://`) und vom Deploy-Workflow mit veroeffentlicht.
+
 ## Quellen (NGSpice / WASM)
 
 - Ngspice User's Manual v46 (HTML): <https://ngspice.sourceforge.io/docs/ngspice-html-manual/manual.xhtml>

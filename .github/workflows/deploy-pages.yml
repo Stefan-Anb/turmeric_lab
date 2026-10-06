@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 # Veroeffentlicht die Web-App auf GitHub Pages, sobald ein Release
 # veroeffentlicht wird. Es werden nur die tatsaechlich benoetigten
-# Dateien (schematics.html, css/, js/) hochgeladen; schematics.html wird
+# Dateien (schematics.html, css/, js/, library/) hochgeladen; schematics.html wird
 # dabei als index.html bereitgestellt, damit die Seite unter der
 # Pages-Wurzel-URL erreichbar ist.
 
@@ -33,6 +33,7 @@ jobs:
           cp schematics.html pages-out/index.html
           cp -r css pages-out/css
           cp -r js pages-out/js
+          cp -r library pages-out/library
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

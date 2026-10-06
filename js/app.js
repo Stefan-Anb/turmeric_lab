@@ -2016,17 +2016,94 @@ function cleanJuncs(){
   // Only remove junctions with 0 wires (no auto-merge of 2-wire junctions)
   S.junctions=S.junctions.filter(function(j){return j.wires.length>0;});
 }
-function clearAll(){
+// "New Schematic": the current schematic is NOT discarded — it stays in the
+// internal library (see "SCHEMATIC FILES" below) and a fresh empty one becomes
+// the current file.
+function newSchematic(){
+  saveSchematic(); // flush the file we are leaving
+  var id=createInternalFile('Untitled',null);
+  setCurrentFile(id);
   S.components=[];S.wires=[];S.junctions=[];S.selected=[];S.nextId=1;S.probes=[];
   view.x=0;view.y=0;view.zoom=1;
   customComponents={};
   cancelWire();applyView();renderAll();renderProps();
   renderCustomCompsList();
+  clearHistory(); pushState();
   saveSchematic();
 }
 
+// ═══ STATE (shared by SVG export, autosave and the internal file store) ═══
+// Full, self-contained description of the current schematic. The simulation
+// setup is read from simulation.js globals when that script is loaded (it is
+// not yet during the very first autosave at startup — hence the typeof guards).
+function collectState(){
+  var simDirEl=document.getElementById('sim-directives');
+  return {version:SCHEMA_VERSION,components:S.components,wires:S.wires,junctions:S.junctions,nextId:S.nextId,
+    // Inline custom-component definitions used by this schematic, so it
+    // stays self-contained on import regardless of the importing browser's
+    // local component library (see components.js: customComponents vs
+    // libraryComponents). JSON.stringify silently drops each def's `draw`
+    // function; mergeCustomComponents() rebuilds a generic one on import.
+    customComponents:customComponents,
+    probes:S.probes||[],
+    // Full simulation setup, including the analysis params of modes that
+    // aren't currently selected, so switching modes never loses their config.
+    sim:{
+      analysis:(typeof simAnalysis!=='undefined')?simAnalysis:undefined,
+      formulas:(typeof simFormulas!=='undefined')?simFormulas:undefined,
+      directives:simDirEl?simDirEl.value:'',
+      saveAll:(typeof getRawMode==='function')?getRawMode():undefined,
+      probes:S.probes||[]
+    }
+  };
+}
+
+// Inverse of collectState(). View (pan/zoom) is never restored; callers
+// zoom-to-fit afterwards. `opts.applySim` additionally restores the
+// simulation setup (skipped at startup, where simulation.js isn't loaded yet,
+// and for temporary swaps in withStateApplied()).
+function applyState(state,opts){
+  opts=opts||{};
+  S.components=state.components||[];
+  S.wires=state.wires||[];
+  S.junctions=state.junctions||[];
+  S.nextId=state.nextId||1;
+  S.selected=[];
+  S.probes=Array.isArray(state.probes)?state.probes:((state.sim&&Array.isArray(state.sim.probes))?state.sim.probes:[]);
+  // Inline custom-component defs are this schematic's own — replace
+  // wholesale (like S.components etc. above), independent of whatever
+  // the local component library currently holds.
+  customComponents=state.customComponents||{};
+  mergeCustomComponents();
+  renderCustomCompsList();
+  if(opts.applySim&&state.sim){
+    var sim=state.sim;
+    if(sim.analysis&&typeof simAnalysis!=='undefined'){
+      simAnalysis.type=sim.analysis.type||simAnalysis.type;
+      if(sim.analysis.tran)for(var kt in sim.analysis.tran)simAnalysis.tran[kt]=sim.analysis.tran[kt];
+      if(sim.analysis.dc)for(var kd in sim.analysis.dc)simAnalysis.dc[kd]=sim.analysis.dc[kd];
+      if(sim.analysis.ac)for(var ka in sim.analysis.ac)simAnalysis.ac[ka]=sim.analysis.ac[ka];
+    }
+    if(Array.isArray(sim.formulas)&&typeof simFormulas!=='undefined')simFormulas=sim.formulas;
+    var simDirEl2=document.getElementById('sim-directives');
+    if(simDirEl2)simDirEl2.value=sim.directives||'';
+    var saveAllEl=document.getElementById('sim-raw-mode');
+    if(saveAllEl&&typeof sim.saveAll==='boolean')saveAllEl.checked=sim.saveAll;
+    if(Array.isArray(sim.probes))S.probes=sim.probes;
+    if(typeof simSelectionAuto!=='undefined')simSelectionAuto=true;
+    if(typeof simSelection!=='undefined')simSelection={};
+    if(typeof saveSimSettings==='function')saveSimSettings();
+    if(typeof renderAnalysisPanel==='function')renderAnalysisPanel();
+    if(typeof renderFormulaList==='function')renderFormulaList();
+    if(typeof renderProbeList==='function')renderProbeList();
+  }
+}
+
 // ═══ EXPORT ═══
-function exportSVG(){
+// `opts.sim` overrides the simulation block (used when exporting a stored
+// file that is temporarily swapped in, see downloadInternalFile()).
+function exportSVG(opts){
+  opts=opts||{};
   var clone=svg.cloneNode(true);
   // remove interactive/overlay elements
   var overlay=clone.querySelector('#lyr-overlay');
@@ -2054,32 +2131,48 @@ function exportSVG(){
   // Embed schematic state for round-trip import
   var desc=document.createElementNS('http://www.w3.org/2000/svg','desc');
   desc.setAttribute('id','schematic-data');
-  var simDirEl=document.getElementById('sim-directives');
-  var state={components:S.components,wires:S.wires,junctions:S.junctions,nextId:S.nextId,
-    // Inline custom-component definitions used by this schematic, so it
-    // stays self-contained on import regardless of the importing browser's
-    // local component library (see components.js: customComponents vs
-    // libraryComponents). JSON.stringify silently drops each def's `draw`
-    // function; mergeCustomComponents() rebuilds a generic one on import.
-    customComponents:customComponents,
-    // Full simulation setup, including the analysis params of modes that
-    // aren't currently selected, so switching modes never loses their config.
-    sim:{
-      analysis:(typeof simAnalysis!=='undefined')?simAnalysis:undefined,
-      formulas:(typeof simFormulas!=='undefined')?simFormulas:undefined,
-      directives:simDirEl?simDirEl.value:'',
-      saveAll:(typeof getRawMode==='function')?getRawMode():undefined,
-      probes:S.probes||[]
-    }
-  };
+  var state=collectState();
+  if('sim' in opts)state.sim=opts.sim;
   desc.textContent=JSON.stringify(state);
   clone.insertBefore(desc,st.nextSibling);
+  downloadBlob(new Blob([clone.outerHTML],{type:'image/svg+xml'}),(opts.filename||currentFileName()||'schematic')+'.svg');
+}
+function downloadBlob(blob,filename){
   var a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob([clone.outerHTML],{type:'image/svg+xml'}));
-  a.download='schematic.svg';a.click();
+  a.href=URL.createObjectURL(blob);
+  a.download=filename;a.click();
+  setTimeout(function(){URL.revokeObjectURL(a.href);},1000);
 }
 
 // ═══ IMPORT ═══
+// Parses an exported SVG and returns its embedded state, or null (after an
+// alert) if it isn't one of ours.
+function parseSchematicSVG(text){
+  var doc=new DOMParser().parseFromString(text,'image/svg+xml');
+  var desc=doc.getElementById('schematic-data');
+  if(!desc){
+    alert('This SVG has no embedded schematic data.\nOnly SVGs exported from TurmericLab can be imported.');
+    return null;
+  }
+  try{ return JSON.parse(desc.textContent); }
+  catch(err){ alert('Failed to parse schematic data: '+err.message); return null; }
+}
+
+// Stores `state` as a NEW internal file and makes it the current schematic.
+// The file we were working on stays in the internal library untouched.
+function openStateAsNewFile(state,name,origin){
+  saveSchematic(); // flush the file we are leaving
+  var id=createInternalFile(name,state,origin);
+  setCurrentFile(id);
+  applyState(state,{applySim:true});
+  // View is NOT restored from import — open with zoom-to-fit instead.
+  cancelWire();renderAll();renderProps();
+  zoomToFit();
+  // reset history to the imported state
+  clearHistory(); pushState();
+  saveSchematic();
+}
+
 function importSVG(){
   var inp=document.createElement('input');
   inp.type='file';inp.accept='.svg,image/svg+xml';
@@ -2087,59 +2180,9 @@ function importSVG(){
     var file=inp.files[0];if(!file)return;
     var reader=new FileReader();
     reader.onload=function(ev){
-      var parser=new DOMParser();
-      var doc=parser.parseFromString(ev.target.result,'image/svg+xml');
-      var desc=doc.getElementById('schematic-data');
-      if(!desc){
-        alert('This SVG has no embedded schematic data.\nOnly SVGs exported from TurmericLab can be imported.');
-        return;
-      }
-        try{
-        var state=JSON.parse(desc.textContent);
-        S.components=state.components||[];
-        S.wires=state.wires||[];
-        S.junctions=state.junctions||[];
-        S.nextId=state.nextId||1;
-        S.probes=[];
-        S.selected=[];
-        // Inline custom-component defs are this schematic's own — replace
-        // wholesale (like S.components etc. above), independent of whatever
-        // the local component library currently holds.
-        customComponents=state.customComponents||{};
-        mergeCustomComponents();
-        renderCustomCompsList();
-        // Restore the simulation setup (analysis params, formulas, manual
-        // directives, probes) if this SVG carries one.
-        if(state.sim){
-          var sim=state.sim;
-          if(sim.analysis&&typeof simAnalysis!=='undefined'){
-            simAnalysis.type=sim.analysis.type||simAnalysis.type;
-            if(sim.analysis.tran)for(var kt in sim.analysis.tran)simAnalysis.tran[kt]=sim.analysis.tran[kt];
-            if(sim.analysis.dc)for(var kd in sim.analysis.dc)simAnalysis.dc[kd]=sim.analysis.dc[kd];
-            if(sim.analysis.ac)for(var ka in sim.analysis.ac)simAnalysis.ac[ka]=sim.analysis.ac[ka];
-          }
-          if(Array.isArray(sim.formulas)&&typeof simFormulas!=='undefined')simFormulas=sim.formulas;
-          var simDirEl2=document.getElementById('sim-directives');
-          if(simDirEl2)simDirEl2.value=sim.directives||'';
-          var saveAllEl=document.getElementById('sim-raw-mode');
-          if(saveAllEl&&typeof sim.saveAll==='boolean')saveAllEl.checked=sim.saveAll;
-          if(Array.isArray(sim.probes))S.probes=sim.probes;
-          if(typeof simSelectionAuto!=='undefined')simSelectionAuto=true;
-          if(typeof simSelection!=='undefined')simSelection={};
-          if(typeof saveSimSettings==='function')saveSimSettings();
-          if(typeof renderAnalysisPanel==='function')renderAnalysisPanel();
-          if(typeof renderFormulaList==='function')renderFormulaList();
-          if(typeof renderProbeList==='function')renderProbeList();
-        }
-        // View is NOT restored from import — open with zoom-to-fit instead.
-        cancelWire();renderAll();renderProps();
-        zoomToFit();
-        // reset history to the imported state
-        clearHistory(); pushState();
-        saveSchematic();
-      } catch(err){
-        alert('Failed to parse schematic data: '+err.message);
-      }
+      var state=parseSchematicSVG(ev.target.result);
+      if(!state)return;
+      openStateAsNewFile(state,file.name.replace(/\.svg$/i,''),null);
     };
     reader.readAsText(file);
   });
@@ -2178,39 +2221,118 @@ function mirrorSelected(){
 // ===== Persistent storage (autosave/load) =====
 // Bump when the persisted schema changes; loadSchematic can then migrate.
 var SCHEMA_VERSION=1;
+
+// ═══ SCHEMATIC FILES (internal library, browser storage) ═══
+// Several schematics live side by side in localStorage:
+//   schematic_files        index: [{id,name,modified,origin?}]
+//   schematic_file_<id>    full state of one file (collectState() format)
+//   schematic_current_file id of the file the editor is working on
+// Autosave only ever writes the current file's key, so it stays cheap.
+// `origin` ({file,version}) records which global-library schematic a file was
+// copied from, so the dialog can flag when the library has a newer version.
+var FILES_INDEX_KEY='schematic_files';
+var FILE_KEY_PREFIX='schematic_file_';
+var CURRENT_FILE_KEY='schematic_current_file';
+var fileIndex=[];
+var currentFileId=null;
+
+function loadFileIndex(){
+  try{
+    var raw=localStorage.getItem(FILES_INDEX_KEY);
+    var arr=raw?JSON.parse(raw):[];
+    fileIndex=Array.isArray(arr)?arr:[];
+  }catch(e){console.warn('Failed to load file index',e);fileIndex=[];}
+}
+function saveFileIndex(){
+  try{ localStorage.setItem(FILES_INDEX_KEY,JSON.stringify(fileIndex)); }
+  catch(e){console.warn('Failed to save file index',e);}
+}
+function findFileEntry(id){
+  for(var i=0;i<fileIndex.length;i++)if(fileIndex[i].id===id)return fileIndex[i];
+  return null;
+}
+function currentFileName(){
+  var f=currentFileId&&findFileEntry(currentFileId);
+  return f?f.name:'';
+}
+function uniqueFileName(base,exceptId){
+  base=(base||'').trim()||'Untitled';
+  var name=base,n=2;
+  function taken(nm){return fileIndex.some(function(f){return f.id!==exceptId&&f.name.toLowerCase()===nm.toLowerCase();});}
+  while(taken(name))name=base+' ('+(n++)+')';
+  return name;
+}
+function readFileState(id){
+  try{ var raw=localStorage.getItem(FILE_KEY_PREFIX+id); return raw?JSON.parse(raw):null; }
+  catch(e){console.warn('Failed to read file',id,e);return null;}
+}
+function writeFileState(id,state){
+  try{ localStorage.setItem(FILE_KEY_PREFIX+id,JSON.stringify(state)); return true; }
+  catch(e){
+    console.warn('Failed to save schematic (browser storage full?)',e);
+    if(!writeFileState.warned){writeFileState.warned=true;alert('Could not save the schematic to browser storage (storage full?).\nUse SAVE or the library\'s DOWNLOAD to keep a copy, and delete unused internal files.');}
+    return false;
+  }
+}
+// state=null creates an empty schematic. Returns the new file's id.
+function createInternalFile(name,state,origin){
+  var id='f'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+  var entry={id:id,name:uniqueFileName(name),modified:Date.now()};
+  if(origin)entry.origin=origin;
+  fileIndex.push(entry);
+  writeFileState(id,state||{version:SCHEMA_VERSION,components:[],wires:[],junctions:[],nextId:1,customComponents:{},probes:[]});
+  saveFileIndex();
+  return id;
+}
+function setCurrentFile(id){
+  currentFileId=id;
+  try{ localStorage.setItem(CURRENT_FILE_KEY,id); }catch(e){}
+  updateFileUI();
+}
+function updateFileUI(){
+  var el=document.getElementById('sb-file');
+  if(el)el.textContent=currentFileName();
+}
+
 function saveSchematic(){
   try{
     // View (pan/zoom) is intentionally not saved — schematic always opens with zoom-to-fit.
-    // Plotted signals (probes) are carried over too, so a reload doesn't quietly
-    // empty the plot config — see loadSchematic() and simSelectionAuto.
-    var state={version:SCHEMA_VERSION,components:S.components,wires:S.wires,junctions:S.junctions,nextId:S.nextId,customComponents:customComponents,
-      probes:S.probes||[]};
-    localStorage.setItem('schematic_state',JSON.stringify(state));
+    if(!currentFileId||!findFileEntry(currentFileId))setCurrentFile(createInternalFile('Untitled',null));
+    if(writeFileState(currentFileId,collectState())){
+      findFileEntry(currentFileId).modified=Date.now();
+      saveFileIndex();
+    }
   }catch(e){console.warn('Failed to save schematic',e);}
 }
 
 function loadSchematic(){
   try{
-    var raw=localStorage.getItem('schematic_state');
-    if(!raw) return;
-    var state=JSON.parse(raw);
+    loadFileIndex();
+    // Migrate the pre-library single-file autosave into the first internal file.
+    var legacy=localStorage.getItem('schematic_state');
+    if(legacy&&!fileIndex.length){
+      try{
+        var id0=createInternalFile('Untitled',JSON.parse(legacy));
+        localStorage.setItem(CURRENT_FILE_KEY,id0);
+      }catch(e){console.warn('Failed to migrate legacy schematic',e);}
+    }
+    if(legacy)localStorage.removeItem('schematic_state');
+    var cur=localStorage.getItem(CURRENT_FILE_KEY);
+    if(!cur||!findFileEntry(cur)){
+      var latest=fileIndex.slice().sort(function(a,b){return b.modified-a.modified;})[0];
+      cur=latest?latest.id:createInternalFile('Untitled',null);
+    }
+    setCurrentFile(cur);
+    var state=readFileState(cur);
+    if(!state)return;
     // Tolerate older saves (no version field) and warn on newer ones.
     var ver=state.version||0;
     if(ver>SCHEMA_VERSION)console.warn('Schematic saved with newer schema v'+ver+' (app supports v'+SCHEMA_VERSION+')');
-    S.components=state.components||[];
-    S.wires=state.wires||[];
-    S.junctions=state.junctions||[];
-    S.nextId=state.nextId||1;
-    S.selected=[];
-    S.probes=Array.isArray(state.probes)?state.probes:[];
-    // View is NOT restored — the schematic will be zoom-to-fit after render.
-    if(state.customComponents){
-      customComponents=state.customComponents;
-      mergeCustomComponents();
-      renderCustomCompsList();
-    }
+    // Simulation setup is not applied here (simulation.js isn't loaded yet and
+    // keeps its own persisted settings); it is applied when switching files.
+    applyState(state,{applySim:false});
     clearHistory(); pushState();
-  }catch(e){console.warn('Failed to load schematic',e);}  
+  }catch(e){console.warn('Failed to load schematic',e);}
 }
 
 window.addEventListener('beforeunload',function(){saveSchematic();});
@@ -2273,6 +2395,7 @@ window.addEventListener('paste',function(e){
 // ═══ KEYBOARD ═══
 document.addEventListener('keydown',function(e){
   if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')return;
+  if(libraryOpen())return; // library dialog is modal: no editor shortcuts behind it
   // Undo / Redo shortcuts
   if((e.ctrlKey||e.metaKey) && (e.key==='z' || e.key==='Z')){
     e.preventDefault(); if(e.shiftKey) redo(); else undo(); return;
@@ -2822,6 +2945,269 @@ function seedLibraryFromDefaults(){
       }
       if(changed){ saveLibrary(); mergeCustomComponents(); renderCustomCompsList(); renderAll(); }
     }).catch(function(){});
+}
+
+// ═══ SCHEMATIC LIBRARY DIALOG (internal files + global project library) ═══
+// "Internal" = schematics in browser storage (see SCHEMATIC FILES above),
+// "Global" = read-only templates shipped with the project in library/,
+// described by library/library.toml. Opening a global template copies it into
+// the internal library, so editing never touches the shipped file.
+var LIBRARY_DIR='library/';
+var LIBRARY_INDEX_FILE='library.toml';
+var globalLibrary={status:'idle',name:'',version:'',entries:[],error:''};
+var libRenamingId=null;
+
+// Minimal TOML subset: comments, [table], [[array of tables]] and
+// `key = value` with strings, numbers, booleans and JSON-style arrays.
+function parseTOML(text){
+  var root={},cur=root,lines=text.replace(/^﻿/,'').split(/\r?\n/);
+  for(var i=0;i<lines.length;i++){
+    var line=stripTomlComment(lines[i]).trim();
+    if(!line)continue;
+    var m=line.match(/^\[\[\s*([A-Za-z0-9_-]+)\s*\]\]$/);
+    if(m){
+      if(!Array.isArray(root[m[1]]))root[m[1]]=[];
+      cur={};root[m[1]].push(cur);continue;
+    }
+    m=line.match(/^\[\s*([A-Za-z0-9_-]+)\s*\]$/);
+    if(m){cur=root[m[1]]={};continue;}
+    var eq=line.indexOf('=');
+    if(eq<1)throw new Error('line '+(i+1)+': expected key = value');
+    var key=line.slice(0,eq).trim().replace(/^"(.*)"$/,'$1');
+    cur[key]=parseTomlValue(line.slice(eq+1).trim(),i+1);
+  }
+  return root;
+}
+function stripTomlComment(line){
+  var q=null;
+  for(var i=0;i<line.length;i++){
+    var c=line[i];
+    if(q){if(c==='\\'&&q==='"'){i++;continue;}if(c===q)q=null;}
+    else if(c==='"'||c==="'")q=c;
+    else if(c==='#')return line.slice(0,i);
+  }
+  return line;
+}
+function parseTomlValue(v,ln){
+  try{
+    if(v[0]==='"'||v[0]==='[')return JSON.parse(v);
+    if(v[0]==="'"&&v.slice(-1)==="'")return v.slice(1,-1);
+    if(v==='true')return true;
+    if(v==='false')return false;
+    if(/^[+-]?\d+(\.\d+)?$/.test(v))return Number(v);
+  }catch(e){}
+  throw new Error('line '+ln+': cannot parse value '+v);
+}
+
+function loadGlobalLibrary(){
+  globalLibrary.status='loading';renderLibrary();
+  return fetch(LIBRARY_DIR+LIBRARY_INDEX_FILE,{cache:'no-store'})
+    .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.text();})
+    .then(function(txt){
+      var t=parseTOML(txt),lib=t.library||{},list=Array.isArray(t.schematic)?t.schematic:[];
+      globalLibrary.name=lib.name||'';
+      globalLibrary.version=lib.version!=null?String(lib.version):'';
+      globalLibrary.entries=list.filter(function(e){return e&&e.file;}).map(function(e){
+        return {file:String(e.file),name:String(e.name||e.file).trim(),description:e.description?String(e.description):'',version:e.version!=null?String(e.version):''};
+      });
+      globalLibrary.status='ok';
+    })
+    .catch(function(e){
+      globalLibrary.status='error';
+      globalLibrary.error=e.message||String(e);
+    })
+    .then(renderLibrary);
+}
+
+function openGlobalSchematic(entry){
+  fetch(LIBRARY_DIR+encodeURI(entry.file),{cache:'no-store'})
+    .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.text();})
+    .then(function(txt){
+      var state=parseSchematicSVG(txt);
+      if(!state)return;
+      openStateAsNewFile(state,entry.name,{file:entry.file,version:entry.version});
+      closeLibrary();
+    })
+    .catch(function(e){alert('Could not load "'+entry.file+'": '+(e.message||e));});
+}
+function downloadGlobalSchematic(entry){
+  fetch(LIBRARY_DIR+encodeURI(entry.file),{cache:'no-store'})
+    .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.blob();})
+    .then(function(blob){downloadBlob(blob,entry.file.split('/').pop());})
+    .catch(function(e){alert('Could not download "'+entry.file+'": '+(e.message||e));});
+}
+
+// Switches the editor to an already stored file (caller flushes the old one).
+function switchToFile(id){
+  var state=readFileState(id);
+  if(!state){alert('This file is missing from browser storage.');return false;}
+  setCurrentFile(id);
+  applyState(state,{applySim:true});
+  cancelWire();renderAll();renderProps();
+  zoomToFit();
+  clearHistory(); pushState();
+  return true;
+}
+function openInternalFile(id){
+  if(id!==currentFileId){saveSchematic();switchToFile(id);}
+  closeLibrary();
+}
+function renameInternalFile(id,name){
+  var f=findFileEntry(id);
+  if(f&&name.trim()){f.name=uniqueFileName(name,id);saveFileIndex();updateFileUI();}
+}
+function deleteInternalFile(id){
+  var f=findFileEntry(id);if(!f)return;
+  if(!confirm('Delete "'+f.name+'" from browser storage?\nThis cannot be undone — use DOWNLOAD first if you want to keep it.'))return;
+  try{localStorage.removeItem(FILE_KEY_PREFIX+id);}catch(e){}
+  fileIndex=fileIndex.filter(function(x){return x.id!==id;});
+  saveFileIndex();
+  if(id===currentFileId){
+    currentFileId=null; // the file is gone: don't let autosave resurrect it
+    var next=fileIndex.slice().sort(function(a,b){return b.modified-a.modified;})[0];
+    if(!next||!switchToFile(next.id))switchToFile(createInternalFile('Untitled',null));
+  }
+}
+// A stored file that is not the current one can only be rendered by the live
+// canvas, so it is swapped in for the export and the editor state restored.
+function downloadInternalFile(id){
+  var f=findFileEntry(id);if(!f)return;
+  if(id===currentFileId){saveSchematic();exportSVG({filename:f.name});return;}
+  var state=readFileState(id);
+  if(!state){alert('This file is missing from browser storage.');return;}
+  var snap=collectState(),keepUndo=undoStack,keepRedo=redoStack,keepSel=S.selected,
+      keepView={x:view.x,y:view.y,zoom:view.zoom};
+  try{
+    applyState(state,{applySim:false});
+    cancelWire();renderAll();zoomToFit();
+    exportSVG({filename:f.name,sim:state.sim});
+  }finally{
+    applyState(snap,{applySim:false});
+    undoStack=keepUndo;redoStack=keepRedo;S.selected=keepSel;
+    view.x=keepView.x;view.y=keepView.y;view.zoom=keepView.zoom;
+    cancelWire();applyView();renderAll();renderProps();
+  }
+}
+
+function libraryOpen(){
+  var m=document.getElementById('library-modal');
+  return !!m&&m.style.display!=='none';
+}
+function showLibrary(){
+  var modal=document.getElementById('library-modal');
+  saveSchematic(); // so the list shows the current file's latest modified time
+  libRenamingId=null;
+  modal.style.display='flex';
+  modal.onclick=function(e){if(e.target===modal)closeLibrary();};
+  renderLibrary();
+  loadGlobalLibrary();
+}
+function closeLibrary(){
+  libRenamingId=null;
+  document.getElementById('library-modal').style.display='none';
+}
+document.addEventListener('keydown',function(e){
+  if(e.key==='Escape'&&libraryOpen()&&e.target.tagName!=='INPUT')closeLibrary();
+});
+
+function libEl(tag,cls,text){
+  var e=document.createElement(tag);
+  if(cls)e.className=cls;
+  if(text!=null)e.textContent=text;
+  return e;
+}
+function libBtn(label,title,fn,extraCls){
+  var b=libEl('button','tb-btn lib-btn'+(extraCls?' '+extraCls:''),label);
+  b.title=title;
+  b.onclick=fn;
+  return b;
+}
+function libSection(title,hint){
+  var sec=libEl('div','lib-section');
+  sec.appendChild(libEl('div','lib-section-title',title));
+  if(hint)sec.appendChild(libEl('div','lib-hint',hint));
+  return sec;
+}
+
+function renderLibrary(){
+  var body=document.getElementById('library-body');
+  if(!body)return;
+  body.textContent='';
+
+  // ── Internal ──
+  var sec=libSection('Internal library','Stored in this browser. Wiping site data deletes it — use DOWNLOAD to keep a file permanently.');
+  var files=fileIndex.slice().sort(function(a,b){return b.modified-a.modified;});
+  if(!files.length)sec.appendChild(libEl('div','lib-empty','No internal schematics.'));
+  var focusInput=null;
+  files.forEach(function(f){
+    var isCur=f.id===currentFileId;
+    var row=libEl('div','lib-row'+(isCur?' lib-row-current':''));
+    var info=libEl('div','lib-info');
+    var nameLine=libEl('div','lib-name-line');
+    if(libRenamingId===f.id){
+      var inp=libEl('input','lib-rename');
+      inp.type='text';inp.value=f.name;
+      var done=false;
+      var commit=function(save){
+        if(done)return;done=true;
+        if(save)renameInternalFile(f.id,inp.value);
+        libRenamingId=null;renderLibrary();
+      };
+      inp.addEventListener('keydown',function(e){
+        if(e.key==='Enter')commit(true);
+        else if(e.key==='Escape'){e.stopPropagation();commit(false);}
+      });
+      inp.addEventListener('blur',function(){commit(true);});
+      nameLine.appendChild(inp);
+      focusInput=inp;
+    }else{
+      nameLine.appendChild(libEl('span','lib-name',f.name));
+    }
+    if(isCur)nameLine.appendChild(libEl('span','lib-badge lib-badge-cur','CURRENT'));
+    info.appendChild(nameLine);
+    var meta='Modified '+new Date(f.modified).toLocaleString();
+    if(f.origin)meta+=' · from library: '+f.origin.file+(f.origin.version?' v'+f.origin.version:'');
+    var metaEl=libEl('div','lib-meta',meta);
+    if(f.origin&&globalLibrary.status==='ok'){
+      var g=globalLibrary.entries.filter(function(e){return e.file===f.origin.file;})[0];
+      if(g&&g.version&&g.version!==f.origin.version)metaEl.appendChild(libEl('span','lib-badge lib-badge-new','v'+g.version+' available'));
+    }
+    info.appendChild(metaEl);
+    row.appendChild(info);
+    var act=libEl('div','lib-actions');
+    act.appendChild(libBtn('OPEN',isCur?'This schematic is already open':'Open this schematic',function(){openInternalFile(f.id);}));
+    act.appendChild(libBtn('RENAME','Rename (internal name only)',function(){libRenamingId=f.id;renderLibrary();}));
+    act.appendChild(libBtn('DOWNLOAD','Download as SVG',function(){downloadInternalFile(f.id);}));
+    act.appendChild(libBtn('DELETE','Delete from browser storage',function(){deleteInternalFile(f.id);renderLibrary();},'lib-btn-danger'));
+    row.appendChild(act);
+    sec.appendChild(row);
+  });
+  body.appendChild(sec);
+
+  // ── Global ──
+  var gTitle='Global library'+(globalLibrary.version?' · v'+globalLibrary.version:'');
+  var gsec=libSection(gTitle,globalLibrary.name||'Templates shipped with the project (read-only). OPEN copies one into your internal library.');
+  if(globalLibrary.status==='loading')gsec.appendChild(libEl('div','lib-empty','Loading…'));
+  else if(globalLibrary.status==='error')gsec.appendChild(libEl('div','lib-empty lib-error','Could not load '+LIBRARY_DIR+LIBRARY_INDEX_FILE+' ('+globalLibrary.error+'). The app has to be served over http(s), not opened via file://.'));
+  else if(globalLibrary.status==='ok'&&!globalLibrary.entries.length)gsec.appendChild(libEl('div','lib-empty','No schematics in the global library yet.'));
+  if(globalLibrary.status==='ok')globalLibrary.entries.forEach(function(e){
+    var row=libEl('div','lib-row');
+    var info=libEl('div','lib-info');
+    var nameLine=libEl('div','lib-name-line');
+    nameLine.appendChild(libEl('span','lib-name',e.name));
+    if(e.version)nameLine.appendChild(libEl('span','lib-badge','v'+e.version));
+    info.appendChild(nameLine);
+    if(e.description)info.appendChild(libEl('div','lib-meta',e.description));
+    row.appendChild(info);
+    var act=libEl('div','lib-actions');
+    act.appendChild(libBtn('OPEN','Copy into the internal library and open',function(){openGlobalSchematic(e);}));
+    act.appendChild(libBtn('DOWNLOAD','Download the SVG file',function(){downloadGlobalSchematic(e);}));
+    row.appendChild(act);
+    gsec.appendChild(row);
+  });
+  body.appendChild(gsec);
+
+  if(focusInput){focusInput.focus();focusInput.select();}
 }
 
 // ═══ INIT ═══

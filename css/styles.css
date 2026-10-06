@@ -344,3 +344,26 @@ body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);displ
 /* ═══ SIDEBAR: drag & drop placement ═══ */
 .comp-btn[draggable=true]{cursor:grab;}
 .comp-btn[draggable=true]:active{cursor:grabbing;}
+
+/* ═══ Schematic library dialog ═══ */
+.lib-modal-content{width:760px;max-width:94vw;}
+.lib-body{overflow-y:auto;padding:4px 16px 16px;}
+.lib-section{margin-top:12px;}
+.lib-section-title{font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--accent);}
+.lib-hint{font-size:11px;color:var(--text-lo);margin:2px 0 8px;}
+.lib-row{display:flex;align-items:center;gap:12px;padding:8px 10px;margin-bottom:4px;background:var(--bg-card);border:1px solid var(--border);border-radius:3px;}
+.lib-row-current{border-color:var(--accent-dim);box-shadow:inset 3px 0 0 var(--accent);}
+.lib-info{flex:1;min-width:0;}
+.lib-name-line{display:flex;align-items:center;gap:8px;}
+.lib-name{font-size:13px;font-weight:600;color:var(--text-hi);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lib-meta{font-size:11px;color:var(--text-mid);margin-top:2px;}
+.lib-rename{flex:1;min-width:0;background:var(--bg-deep);border:1px solid var(--accent);border-radius:3px;color:var(--text-hi);font-family:'Share Tech Mono',monospace;font-size:12px;padding:3px 6px;outline:none;}
+.lib-badge{font-size:9px;font-weight:700;letter-spacing:.5px;padding:1px 6px;border-radius:8px;border:1px solid var(--border-hi);color:var(--text-mid);flex:none;margin-left:6px;}
+.lib-name-line .lib-badge{margin-left:0;}
+.lib-badge-cur{color:var(--accent);border-color:var(--accent-dim);}
+.lib-badge-new{color:var(--accent2);border-color:var(--accent2);}
+.lib-actions{display:flex;gap:6px;flex:none;}
+.lib-btn{height:24px;padding:0 8px;font-size:11px;}
+.lib-btn-danger:hover{color:#ff5f5f;border-color:#ff5f5f;background:#ff5f5f18;}
+.lib-empty{font-size:12px;color:var(--text-lo);padding:8px 2px;}
+.lib-error{color:#ff5f5f;}

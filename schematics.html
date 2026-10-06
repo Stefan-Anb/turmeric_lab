@@ -26,9 +26,10 @@
     <svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 3h8M5 3V2h2v1M4 3l.5 7h3L8 3" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>DELETE
   </button>
   <div class="tb-sep"></div>
-  <button class="tb-btn" onclick="clearAll()">CLEAR</button>
+  <button class="tb-btn" onclick="newSchematic()" title="Start an empty schematic. The current one stays in the internal library.">NEW SCHEMATIC</button>
   <button class="tb-btn" onclick="exportSVG()">SAVE</button>
   <button class="tb-btn" onclick="importSVG()">LOAD</button>
+  <button class="tb-btn" onclick="showLibrary()" title="Browse internal (browser) and global (project) schematics">SCHEMATIC LIBRARY</button>
   <div class="tb-sep"></div>
   <button class="tb-btn" onclick="zoomToFit()">
     <svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 4V1h3M8 1h3v3M11 8v3H8M4 11H1V8" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>ZOOM FIT
@@ -263,6 +264,7 @@
 <div id="statusbar">
   <div class="sb-item">X: <span id="sb-x">0</span></div>
   <div class="sb-item">Y: <span id="sb-y">0</span></div>
+  <div class="sb-item">File: <span id="sb-file"></span></div>
   <div class="sb-item">Comp: <span id="sb-comps">0</span></div>
   <div class="sb-item">Wires: <span id="sb-wires">0</span></div>
   <div class="sb-item" id="sb-hint">Select a component or press W for wire</div>
@@ -273,6 +275,13 @@
     <div class="modal-header">SPICE Netlist<button class="modal-close" onclick="closeNetlist()">&times;</button></div>
     <textarea id="netlist-text" readonly></textarea>
     <button class="tb-btn" onclick="copyNetlist()">Copy to Clipboard</button>
+  </div>
+</div>
+
+<div id="library-modal" class="modal" style="display:none">
+  <div class="modal-content lib-modal-content">
+    <div class="modal-header">Schematic Library<button class="modal-close" onclick="closeLibrary()">&times;</button></div>
+    <div id="library-body" class="lib-body"></div>
   </div>
 </div>
 

@@ -12,3 +12,4 @@ Einbinden der Echtzeit-Simulation (mit Javscript-Code)
 * WASM-Build vom POC einbinden
 * Code-Editor ergänzen
 * Wrapper für Netznamen? -> bestenfalls Auto-Completion
+
