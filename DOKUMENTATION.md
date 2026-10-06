@@ -227,6 +227,7 @@ zunächst feste Modellkarten und durchläuft dann `S.components` in einer große
 | zener *(neu 2026-08-14)* | `D<label> nA nK zm_<ref>` + eigene `.model … D(BV=…)` | `Dxxx n+ n- model` | ok; Durchbruchspannung je Instanz |
 | scr *(neu 2026-08-14)* | `X<label> nA nG nK scr_<ref>` + verhaltensbasierter `.subckt` | `Xxxx nodes subckt` | ok; Latch-Modell, siehe 3.4 |
 | pwmgen *(neu 2026-08-14)* | `X<label> IN OUTH COMH OUTL COML pwmgen_<ref>` + `.subckt` | `Xxxx nodes subckt` | ok; B-Source-Modell, siehe 3.4 |
+| indmotor / clarke / park / svm / pi / integrator / mathblk *(Motor Control)* | `X<label> <Pins in CD-Reihenfolge> <typ>_<ref>` + `.subckt` | `Xxxx nodes subckt` | ok; B-Source-Modelle, siehe 3.5 |
 
 ### 3.4 Zusammengesetzte Bauteile (Modellkarten und Subcircuits)
 
@@ -274,6 +275,79 @@ und OUTL/COML) probebar.
 Die 3-Pin-VDMOS-Form ist laut Manual gültig ("the fourth node of the vdmos
 instance can be removed"), siehe Quellen unten. Die NPN/PNP-Reihenfolge
 (Collector, Base, Emitter) stimmt mit `Qxxx nc nb ne` überein.
+
+### 3.5 Motor-Control-Blöcke (`indmotor`, `clarke`, `park`, `svm`)
+
+Reine Signalblöcke für eine FOC-Simulation, jeweils ein Subcircuit pro Instanz
+(`MC_SUBCKT` in js/netlist.js, Portreihenfolge = Pinreihenfolge in `CD`).
+Alle Signale sind Knotenspannungen in SI-Einheiten (1 V = 1 A / 1 rad / 1 rad/s /
+1 N·m). Pins ohne Draht bekommen einen eigenen Knoten (`nc_<ref>_<pin>`), weil
+sonst alle offenen Pins auf dem gemeinsamen Fallback `n000` zusammenfielen und
+zwei offene Ausgänge kurzgeschlossen würden. Eingänge haben 1 G nach Masse.
+
+**Asynchronmotor.** Käfigläufer im ruhenden αβ-Koordinatensystem,
+amplitudeninvariante Clarke-Skalierung (2/3), Stern mit schwebendem Sternpunkt.
+Zustände: Stator- und Rotorflussverkettung (4 Integratoren), Drehzahl, Winkel.
+Ein Integrator ist eine B-Stromquelle in einen Kondensator von 1 F (J für die
+Drehzahl). Gleichungen: dψs/dt = vs − Rs·is, dψr/dt = −Rr·ir + j·p·ω·ψr,
+Te = 1,5·p·(ψsα·isβ − ψsβ·isα), J·dω/dt = Te − TL − B·ω. Die Ableitungen sind
+mit `(time>0)` maskiert, damit der Arbeitspunkt unabhängig von den Spannungen bei
+t=0 der Ruhezustand ist; jeder Zustandsknoten hat 1 G nach Masse (sonst singulär).
+Pins: `A B C` (Stator), `TL` Lastmoment (Eingang), `TE` inneres Moment, `W`
+Drehzahl [rpm], `TH` mechanischer Winkel [Grad] (intern rad/s und rad; für Park: rad = Grad·π/180, ×p), `IA IB IC`
+Phasenströme als Spannung 1 V/A (positiv in die Maschine). Defaults: 4 kW /
+400 V / 50 Hz Standardmotor (Rs 1,405 Ω, Rr 1,395 Ω, Lls = Llr = 5,839 mH,
+Lm 172,2 mH, J 13,1·10⁻³ kg·m², p = 2).
+Verifiziert: 3×325 V / 50 Hz Hochlauf auf 156,9 rad/s (Synchrondrehzahl 157,08),
+mit 20 N·m Last 152 rad/s. **Zeitschritt beachten:** die Trapezintegration lässt
+den simulierten Rotorfluss bei großem Schritt zu langsam drehen (bei Tmax = 1 ms
+ca. 0,8 % Drehzahlfehler, bei 100 µs vernachlässigbar). Mit PWM-Takt ohnehin
+kein Thema.
+
+**Clarke.** `IA IB IC → ALPHA BETA`, α = 2/3·(a − b/2 − c/2), β = (b − c)/√3.
+Option "Two inputs only": c = −a−b, dann α = a, β = (a + 2b)/√3.
+
+**Park.** `IN1 IN2 TH → OUT1 OUT2`, TH = d-Achsenwinkel in rad. Vorwärts
+d = α·cosθ + β·sinθ, q = −α·sinθ + β·cosθ; rückwärts (Option "dq → αβ")
+α = d·cosθ − q·sinθ, β = d·sinθ + q·cosθ.
+
+**Raumzeigermodulation.** `VALPHA VBETA VDC → OUTA OUTB OUTC`. Aus αβ werden die
+drei Phasenspannungen gebildet, Nullsystem-Injektion −(max+min)/2 ergibt exakt
+die SVPWM-Tastgrade d = 0,5 + (v − (max+min)/2)/Vdc, begrenzt auf 0…1,
+ausgegeben als d·Range (Default 1 V = 100 %, passend zum PWM-Generator-Eingang).
+Vdc kommt aus der Property, oder vom Pin VDC, sobald dort mehr als 1 V anliegen.
+Verifiziert: Clarke → Park mit θ = ωt liefert d = 0, q = −10 für eine
+sin-Dreiphasenquelle (10 V), und die Tastgradeinträge erfüllen
+dA − dB = (vA − vB)/Vdc exakt.
+
+**PI-Regler.** `REF FB → OUT`, e = REF − FB, OUT = clamp(Kp·e + xi) mit
+xi' = Ki·e. Anti-Windup per bedingter Integration: der Integrator hält an, solange
+der Ausgang am Limit ist und der Fehler weiter in die Begrenzung schiebt.
+Verifiziert: Kp = 2, Ki = 100, Eingang 0,1 V liefert 0,2 V + 10·t.
+
+**Integrator.** `IN → OUT`, OUT = K·∫IN dt, Start bei 0 (wie die Motorzustände
+mit `(time>0)` maskiert).
+
+**Funktionsblock (`mathblk`).** `IN1 IN2 IN3 → OUT`, frei wählbarer Ausdruck in
+`in1`, `in2`, `in3` und `time` (wird zu einer B-Voltage-Source mit `v(INx)`).
+Dient für Referenzverläufe, Summen, Verstärkungen und den gemittelten
+Wechselrichter. Ein Ausdruck mit unbekanntem Bezeichner lässt dieses
+WASM-ngspice hängen statt einen Fehler zu melden (Stop-Button nutzen).
+
+**Beispiel `library/foc_induction_motor.svg`.** Indirekte feldorientierte Regelung
+(IFOC) des 4-kW-Motors: Drehzahl-PI liefert iq*, ein Funktionsblock id* (12 A
+Vorflussung bis 80 ms, danach 5,5 A), Schlupf ωsl = Rr/Lr·iq*/id*,
+ωe = p·ω + ωsl (Funktionsblock rechnet rpm → rad/s um), θe = ∫ωe. Die Phasenströme (1 V/A vom Motor) laufen über
+Clarke und Park(θe) in id/iq, zwei Strom-PI (Kp 30 V/A, Ki 7000) liefern vd/vq,
+Rück-Park und Raumzeigermodulation die Tastgrade. Der Wechselrichter ist
+**gemittelt** (Phasenspannung = (d − 0,5)·600 V über Funktionsblöcke). Verifiziert
+(Tmax 50 µs, 4 s Rechenzeit für 0,5 s): Drehzahlsprung 0 → 950 rpm bei 0,1 s
+mit ca. 2 % Überschwingen, id folgt id*, bei 15 N·m Last ab 0,35 s Einbruch auf
+ca. 900 rpm und Ausregelung, Te = 15,2 N·m.
+Die Verdrahtung läuft über Netznamen (Draht-Stubs mit gleichem Namen = ein Knoten).
+Eine schaltende Variante (3 × PWM-Generator + 6 VDMOS an 600 V) bricht in
+ngspice bei 182 µs mit "Timestep too small" am ersten MOSFET ab; sie ist nicht
+Teil der Bibliothek.
 
 ### 3.2 Konkrete Fehler in der Netzlistengenerierung
 

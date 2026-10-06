@@ -2090,7 +2090,9 @@ function applyState(state,opts){
     var saveAllEl=document.getElementById('sim-raw-mode');
     if(saveAllEl&&typeof sim.saveAll==='boolean')saveAllEl.checked=sim.saveAll;
     if(Array.isArray(sim.probes))S.probes=sim.probes;
-    if(typeof simSelectionAuto!=='undefined')simSelectionAuto=true;
+    // A schematic that carries probes plots exactly those (probing takes over
+    // from the automatic "all node voltages" set); without probes it stays auto.
+    if(typeof simSelectionAuto!=='undefined')simSelectionAuto=!(S.probes&&S.probes.length);
     if(typeof simSelection!=='undefined')simSelection={};
     if(typeof saveSimSettings==='function')saveSimSettings();
     if(typeof renderAnalysisPanel==='function')renderAnalysisPanel();
@@ -2135,7 +2137,10 @@ function exportSVG(opts){
   if('sim' in opts)state.sim=opts.sim;
   desc.textContent=JSON.stringify(state);
   clone.insertBefore(desc,st.nextSibling);
-  downloadBlob(new Blob([clone.outerHTML],{type:'image/svg+xml'}),(opts.filename||currentFileName()||'schematic')+'.svg');
+  // XMLSerializer, not outerHTML: the HTML-style serialization writes void
+  // elements bare (a Note's blank line becomes `<br>` inside its foreignObject),
+  // which makes the file ill-formed XML and breaks importSVG()'s DOMParser.
+  downloadBlob(new Blob([new XMLSerializer().serializeToString(clone)],{type:'image/svg+xml'}),(opts.filename||currentFileName()||'schematic')+'.svg');
 }
 function downloadBlob(blob,filename){
   var a=document.createElement('a');

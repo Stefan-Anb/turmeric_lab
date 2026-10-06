@@ -17,10 +17,16 @@
 
 [library]
 name = "TurmericLab Schematic Library"
-version = "1.0.0"   # Version der gesamten Bibliothek, bei jeder Aenderung erhoehen
+version = "1.1.0"   # Version der gesamten Bibliothek, bei jeder Aenderung erhoehen
 
 [[schematic]]
 file = "rc_lowpass.svg"           # Dateiname relativ zu library/
 name = "RC Low-Pass Filter"       # Anzeigename im Dialog
 description = "Pulse source driving a 1k / 100n RC low-pass (tau = 100 us). Transient analysis preset."
 version = "1.0.0"                 # Version dieses Schematics
+
+[[schematic]]
+file = "foc_induction_motor.svg"
+name = "FOC Induction Motor"
+description = "Indirect rotor-field-oriented control of a 4 kW induction motor: speed PI, dq current PIs, Clarke/Park, space vector modulation, averaged inverter. Speed step at 0.1 s, load step at 0.35 s. Transient analysis preset."
+version = "1.0.0"

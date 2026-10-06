@@ -209,7 +209,7 @@ function buildSpiceRefMap(){
     if(t==='npn'||t==='pnp'){map[c.id]='Q'+(c.label||'');continue;}
     if(t==='nmos'||t==='pmos'){map[c.id]='M'+(c.label||'');continue;}
     if(t==='diode'||t==='led'||t==='zener'){map[c.id]='D'+(c.label||'');continue;}
-    if(t==='scr'||t==='pwmgen'){map[c.id]='X'+(c.label||'');continue;}
+    if(t==='scr'||t==='pwmgen'||MC_SUBCKT[t]){map[c.id]='X'+(c.label||'');continue;}
     if(t.indexOf('custom_')===0){map[c.id]='X'+(c.label||'');continue;}
     if(passive.indexOf(t)>=0){map[c.id]=c.label||'';continue;}
   }
@@ -385,6 +385,184 @@ function pwmGenSubckt(name,c){
   ];
 }
 
+// ═══ MOTOR CONTROL BLOCKS ═══
+// All signals are plain node voltages in SI units (1 V = 1 A / 1 rad / 1 rad/s /
+// 1 N·m …). Each block is one per-instance subcircuit with its parameters
+// inlined, and its port order is exactly the pin order of the CD entry.
+
+// Expression operand: a plain number if the text parses as one (so "5.839m"
+// works inside a B-source), otherwise the raw text in parentheses (.param names,
+// {expressions}).
+function mcExpr(val,def){
+  var t=String(val==null||String(val).trim()===''?def:val).trim();
+  if(!/[{}]/.test(t)){
+    var n=parseEngNumber(t);
+    if(isFinite(n))return '('+String(+n.toPrecision(12))+')';
+  }
+  return '('+t+')';
+}
+// Element value (C card): keep SPICE notation as typed.
+function mcVal(val,def){
+  return String(val==null||String(val).trim()===''?def:val).trim();
+}
+var MC_SQRT3_2='0.8660254037844386';
+
+// Induction motor, stationary alpha/beta frame, amplitude-invariant (Clarke 2/3),
+// star connected with floating neutral. State variables are the stator and
+// rotor flux linkages (4 integrators), plus speed and angle. An integrator is
+// "B current source into a capacitor of 1 F" (v = integral of the current);
+// each state node also gets a 1 G leak to ground for the DC operating point, and
+// the derivatives are gated with (time>0) so the operating point is the plain
+// rest state whatever the inverter outputs at t=0.
+//   dpsi_s/dt = v_s - Rs i_s            dpsi_r/dt = -Rr i_r + j we psi_r
+//   psi_s = Ls i_s + Lm i_r             psi_r = Lm i_s + Lr i_r
+//   Te = 1.5 p (psi_sa i_sb - psi_sb i_sa)     J dw/dt = Te - TL - B w
+function inductionMotorSubckt(name,c){
+  var p=mcExpr(c.im_p,'2'),rs=mcExpr(c.im_rs,'1.405'),rr=mcExpr(c.im_rr,'1.395');
+  var lls=mcExpr(c.im_lls,'5.839m'),llr=mcExpr(c.im_llr,'5.839m'),lm=mcExpr(c.im_lm,'172.2m');
+  var bf=mcExpr(c.im_b,'1m'),jv=mcVal(c.im_j,'13.1m');
+  var ls='('+lls+'+'+lm+')',lr='('+llr+'+'+lm+')';
+  var d='('+ls+'*'+lr+'-'+lm+'*'+lm+')';
+  var g='(time>0)';
+  var s3=MC_SQRT3_2;
+  return [
+    '* Induction motor ('+name+'): stator/rotor flux state model',
+    '.subckt '+name+' A B C TL TE W TH IA IB IC',
+    'Rla A 0 1G','Rlb B 0 1G','Rlc C 0 1G','Rtl TL 0 1G','Rnn nn 0 1Meg',
+    'Bvsa vsa 0 V = (2/3)*(v(A)-0.5*v(B)-0.5*v(C))',
+    'Bvsb vsb 0 V = (v(B)-v(C))/sqrt(3)',
+    'Bisa isa 0 V = ('+lr+'*v(psa)-'+lm+'*v(pra))/'+d,
+    'Bisb isb 0 V = ('+lr+'*v(psb)-'+lm+'*v(prb))/'+d,
+    'Bira ira 0 V = ('+ls+'*v(pra)-'+lm+'*v(psa))/'+d,
+    'Birb irb 0 V = ('+ls+'*v(prb)-'+lm+'*v(psb))/'+d,
+    'Bdpsa 0 psa I = '+g+' ? (v(vsa)-'+rs+'*v(isa)) : 0',
+    'Bdpsb 0 psb I = '+g+' ? (v(vsb)-'+rs+'*v(isb)) : 0',
+    'Bdpra 0 pra I = '+g+' ? (-'+rr+'*v(ira)-'+p+'*v(ww)*v(prb)) : 0',
+    'Bdprb 0 prb I = '+g+' ? (-'+rr+'*v(irb)+'+p+'*v(ww)*v(pra)) : 0',
+    'Cpsa psa 0 1','Cpsb psb 0 1','Cpra pra 0 1','Cprb prb 0 1',
+    'Rpsa psa 0 1G','Rpsb psb 0 1G','Rpra pra 0 1G','Rprb prb 0 1G',
+    'Btrq trq 0 V = 1.5*'+p+'*(v(psa)*v(isb)-v(psb)*v(isa))',
+    'Bdww 0 ww I = '+g+' ? (v(trq)-v(TL)-'+bf+'*v(ww)) : 0',
+    'Cww ww 0 '+jv,'Rww ww 0 1G',
+    'Bdth 0 thm I = '+g+' ? v(ww) : 0',
+    'Cthm thm 0 1','Rthm thm 0 1G',
+    'Bia A nn I = v(isa)',
+    'Bib B nn I = -0.5*v(isa)+'+s3+'*v(isb)',
+    'Bic C nn I = -0.5*v(isa)-'+s3+'*v(isb)',
+    'BoTE TE 0 V = v(trq)',
+    'BoW W 0 V = v(ww)*9.549296585513720',
+    'BoTH TH 0 V = v(thm)*57.29577951308232',
+    'BoIA IA 0 V = v(isa)',
+    'BoIB IB 0 V = -0.5*v(isa)+'+s3+'*v(isb)',
+    'BoIC IC 0 V = -0.5*v(isa)-'+s3+'*v(isb)',
+    '.ends '+name
+  ];
+}
+
+// Clarke transform abc -> alpha/beta, amplitude invariant.
+function clarkeSubckt(name,c){
+  var two=(c.clk_two===true||c.clk_two==='true');
+  return [
+    '* Clarke transform ('+name+')',
+    '.subckt '+name+' IA IB IC ALPHA BETA',
+    'Rla IA 0 1G','Rlb IB 0 1G','Rlc IC 0 1G',
+    two?'Bal ALPHA 0 V = v(IA)'
+        :'Bal ALPHA 0 V = (2/3)*(v(IA)-0.5*v(IB)-0.5*v(IC))',
+    two?'Bbe BETA 0 V = (v(IA)+2*v(IB))/sqrt(3)'
+        :'Bbe BETA 0 V = (v(IB)-v(IC))/sqrt(3)',
+    '.ends '+name
+  ];
+}
+
+// Park transform; TH is the d-axis angle in rad.
+function parkSubckt(name,c){
+  var inv=(c.park_dir==='inv');
+  return [
+    '* Park transform, '+(inv?'dq -> alpha/beta':'alpha/beta -> dq')+' ('+name+')',
+    '.subckt '+name+' IN1 IN2 TH OUT1 OUT2',
+    'Rl1 IN1 0 1G','Rl2 IN2 0 1G','Rlt TH 0 1G',
+    inv?'Bo1 OUT1 0 V = v(IN1)*cos(v(TH))-v(IN2)*sin(v(TH))'
+        :'Bo1 OUT1 0 V = v(IN1)*cos(v(TH))+v(IN2)*sin(v(TH))',
+    inv?'Bo2 OUT2 0 V = v(IN1)*sin(v(TH))+v(IN2)*cos(v(TH))'
+        :'Bo2 OUT2 0 V = -v(IN1)*sin(v(TH))+v(IN2)*cos(v(TH))',
+    '.ends '+name
+  ];
+}
+
+// Space vector modulation as min/max (zero-sequence) injection, which gives
+// exactly the SVPWM duty cycles: d_x = 0.5 + (v_x - (max+min)/2) / Vdc,
+// clamped to 0..1. If the VDC pin carries more than 1 V it overrides the
+// Vdc property (DC-link ripple/droop); left open it falls back to the property.
+function svmSubckt(name,c){
+  var vdc=mcExpr(c.svm_vdc,'400'),range=mcExpr(c.svm_range,'1');
+  var s3=MC_SQRT3_2;
+  function duty(x){return 'Bd'+x+' d'+x+' 0 V = 0.5+(v(p'+x+')-0.5*(v(mx)+v(mn)))/v(vd)';}
+  function out(x,X){return 'Bo'+x+' OUT'+X+' 0 V = '+range+'*((v(d'+x+')<0)?0:((v(d'+x+')>1)?1:v(d'+x+')))';}
+  return [
+    '* Space vector modulation ('+name+')',
+    '.subckt '+name+' VALPHA VBETA VDC OUTA OUTB OUTC',
+    'Rl1 VALPHA 0 1G','Rl2 VBETA 0 1G','Rl3 VDC 0 1G',
+    'Bvd vd 0 V = (v(VDC)>1) ? v(VDC) : '+vdc,
+    'Bpa pa 0 V = v(VALPHA)',
+    'Bpb pb 0 V = -0.5*v(VALPHA)+'+s3+'*v(VBETA)',
+    'Bpc pc 0 V = -0.5*v(VALPHA)-'+s3+'*v(VBETA)',
+    'Bmx mx 0 V = (v(pa)>v(pb)) ? ((v(pa)>v(pc))?v(pa):v(pc)) : ((v(pb)>v(pc))?v(pb):v(pc))',
+    'Bmn mn 0 V = (v(pa)<v(pb)) ? ((v(pa)<v(pc))?v(pa):v(pc)) : ((v(pb)<v(pc))?v(pb):v(pc))',
+    duty('a'),duty('b'),duty('c'),
+    out('a','A'),out('b','B'),out('c','C'),
+    '.ends '+name
+  ];
+}
+
+// PI controller, out = clamp(Kp*e + xi), e = REF - FB, with xi' = Ki*e. Anti-windup
+// by conditional integration: the integrator stops while the output is saturated
+// and the error would push it further into the limit.
+function piSubckt(name,c){
+  var kp=mcExpr(c.pi_kp,'1'),ki=mcExpr(c.pi_ki,'100');
+  var mn=mcExpr(c.pi_min,'-10'),mx=mcExpr(c.pi_max,'10');
+  return [
+    '* PI controller ('+name+')',
+    '.subckt '+name+' REF FB OUT',
+    'Rl1 REF 0 1G','Rl2 FB 0 1G',
+    'Ber er 0 V = v(REF)-v(FB)',
+    'Bu u 0 V = '+kp+'*v(er)+v(xi)',
+    'Bdi 0 xi I = (time>0) ? ( ((v(u)>'+mx+' && v(er)>0) || (v(u)<'+mn+' && v(er)<0)) ? 0 : '+ki+'*v(er) ) : 0',
+    'Cxi xi 0 1','Rxi xi 0 1G',
+    'Bo OUT 0 V = (v(u)>'+mx+') ? '+mx+' : ((v(u)<'+mn+') ? '+mn+' : v(u))',
+    '.ends '+name
+  ];
+}
+
+// Integrator, out = K * integral(in) dt, starting at 0 (gated like the motor states).
+function integratorSubckt(name,c){
+  var k=mcExpr(c.int_k,'1');
+  return [
+    '* Integrator ('+name+')',
+    '.subckt '+name+' IN OUT',
+    'Rl IN 0 1G',
+    'Bdi 0 xi I = (time>0) ? '+k+'*v(IN) : 0',
+    'Cxi xi 0 1','Rxi xi 0 1G',
+    'Bo OUT 0 V = v(xi)',
+    '.ends '+name
+  ];
+}
+
+// Free function block; in1..in3 in the expression become v(IN1)..v(IN3).
+function mathBlockSubckt(name,c){
+  var e=String(c.fn_expr==null||String(c.fn_expr).trim()===''?'0':c.fn_expr).trim();
+  e=e.replace(/\bin([1-3])\b/gi,'v(IN$1)');
+  return [
+    '* Function block ('+name+')',
+    '.subckt '+name+' IN1 IN2 IN3 OUT',
+    'Rl1 IN1 0 1G','Rl2 IN2 0 1G','Rl3 IN3 0 1G',
+    'Bo OUT 0 V = '+e,
+    '.ends '+name
+  ];
+}
+
+var MC_SUBCKT={indmotor:inductionMotorSubckt,clarke:clarkeSubckt,park:parkSubckt,svm:svmSubckt,
+  pi:piSubckt,integrator:integratorSubckt,mathblk:mathBlockSubckt};
+
 // ═══ MODEL SELECTION ═══
 // Symbols carry a part number for documentation (2N2222, 1N4148, RED …), but a
 // part number is not a SPICE model. Unless the user actually supplied a
@@ -462,6 +640,7 @@ function generateNetlist(){
   var zenerModels=[];   // per-instance .model cards for Z-diodes
   var pwmSubs=[];       // per-instance PWM generator subcircuits
   var scrSubs=[];       // per-instance thyristor subcircuits
+  var mcSubs=[];        // per-instance motor-control block subcircuits
   var mosModels=[];     // per-instance .model cards for MOSFETs (sized from Rds(on))
   // Determine which component classes are actually present, so we only emit
   // the default .model card for classes that have at least one instance.
@@ -670,6 +849,22 @@ function generateNetlist(){
       lines.push(ref+' '+nets.join(' ')+' '+subname);
       continue;
     }
+    if(MC_SUBCKT[c.type]){
+      var ref=refMap[c.id];
+      var subname=c.type+'_'+ref.toLowerCase();
+      mcSubs.push(MC_SUBCKT[c.type](subname,c));
+      var nets=[];
+      for(var pi=0;pi<def.pins.length;pi++){
+        var tp=xfPin(def.pins[pi].x,def.pins[pi].y,c.rot||0,c.mirror||false);
+        var nn=getNetNameWithTempNames(c.x+tp.x,c.y+tp.y);
+        // an unwired pin resolves to the shared fallback "n000" — give it its own
+        // node so two open outputs never end up shorted together
+        if(nn==='n000')nn='nc_'+ref.toLowerCase()+'_'+def.pins[pi].n.toLowerCase();
+        nets.push(nn);
+      }
+      lines.push(ref+' '+nets.join(' ')+' '+subname);
+      continue;
+    }
     if(c.type==='diode'||c.type==='led'){
       var ref=refMap[c.id];
       var model=pickModel(c.value,'defaultdiode',userModels,modelNotes,ref);
@@ -756,6 +951,11 @@ function generateNetlist(){
   for(var pi2=0;pi2<pwmSubs.length;pi2++){
     lines.push('');
     for(var pl=0;pl<pwmSubs[pi2].length;pl++)lines.push(pwmSubs[pi2][pl]);
+  }
+
+  for(var mi3=0;mi3<mcSubs.length;mi3++){
+    lines.push('');
+    for(var ml=0;ml<mcSubs[mi3].length;ml++)lines.push(mcSubs[mi3][ml]);
   }
 
   var processedSubcircuits={};

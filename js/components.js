@@ -16,6 +16,15 @@ function AH(p,x1,y1,x2,y2){
   PY(p,`${x2},${y2} ${x2-nx*10+px*4},${y2-ny*10+py*4} ${x2-nx*10-px*4},${y2-ny*10-py*4}`,'comp-body');
 }
 
+// Pin-name label inside a block symbol (the pwmgen/motor-control style).
+// `side` is the text-anchor that makes the text grow away from the pin edge;
+// it goes through mSide() so mirrored parts keep it pointing inwards.
+function PL(g,v,txt,x,y,side){
+  var t=el('text',{x:x,y:y+4,class:'comp-label'});
+  t.textContent=txt;t.setAttribute('text-anchor',mSide(v,side));
+  t.style.fontSize='12px';g.appendChild(t);return t;
+}
+
 // Picks the label/value clearance for a component that draws itself in a
 // fixed local frame while its rot/mirror is applied afterwards (see
 // renderComps() in app.js). Reference/value text never rotates with the
@@ -539,6 +548,177 @@ const CD={
         'comp-body').style.fill='none';
       T(g,-2,-90,v.label||'PWM','comp-label');
       T(g,-2,48,(v.pwm_freq||'')?((v.pwm_freq||'')+'Hz'):'','comp-value');
+    }
+  },
+  indmotor:{
+    // Three-phase squirrel-cage induction motor (behavioural model, see
+    // inductionMotorSubckt() in js/netlist.js). Electrical side: stator
+    // terminals A/B/C (star, neutral internal). Mechanical/signal side
+    // (voltages): TL load torque in [N·m], TE electromagnetic torque out
+    // [N·m], W speed out [rpm], TH mechanical angle out [deg].
+    // iA/iB/iC mirror the phase currents as 1 V/A voltages for current feedback.
+    lbl:'IM',val:'',hitW:220,hitH:240,
+    props:{
+      label:{l:'Reference'},
+      im_p:{l:'Pole pairs p',def:'2'},
+      im_rs:{l:'Stator resistance Rs (Ω)',def:'1.405'},
+      im_rr:{l:'Rotor resistance Rr (Ω)',def:'1.395'},
+      im_lls:{l:'Stator leakage Lls (H)',def:'5.839m'},
+      im_llr:{l:'Rotor leakage Llr (H)',def:'5.839m'},
+      im_lm:{l:'Magnetizing inductance Lm (H)',def:'172.2m'},
+      im_j:{l:'Inertia J (kg·m²)',def:'13.1m'},
+      im_b:{l:'Friction B (N·m·s)',def:'1m'}
+    },
+    pins:[{x:-100,y:-40,n:'A'},{x:-100,y:0,n:'B'},{x:-100,y:40,n:'C'},
+          {x:100,y:-60,n:'TL'},{x:100,y:-20,n:'TE'},{x:100,y:20,n:'W'},{x:100,y:60,n:'TH'},
+          {x:-40,y:100,n:'IA'},{x:0,y:100,n:'IB'},{x:40,y:100,n:'IC'}],
+    draw(g,v){
+      R(g,-80,-80,160,160,'comp-body');
+      for(var i=0;i<3;i++){
+        L(g,-100,-40+i*40,-80,-40+i*40,'comp-pin');
+        L(g,-40+i*40,80,-40+i*40,100,'comp-pin');
+      }
+      for(var j=0;j<4;j++)L(g,80,-60+j*40,100,-60+j*40,'comp-pin');
+      // motor symbol: stator circle with air-gap ring, M and 3~
+      CE(g,0,-6,36,'comp-body');
+      var ring=CE(g,0,-6,29,'comp-body');ring.style.fill='none';ring.style.strokeDasharray='3 3';ring.style.opacity='.5';
+      var m=TA(g,0,-14,'M','comp-label');m.style.fontSize='22px';
+      var ph=TA(g,0,12,'3~','comp-label');ph.style.fontSize='13px';
+      var lab=[['A',-40],['B',0],['C',40]];
+      for(var a=0;a<3;a++)PL(g,v,lab[a][0],-72,lab[a][1],'start');
+      var rl=[['TL',-60],['Te',-20],['ω',20],['θ',60]];
+      for(var b=0;b<4;b++)PL(g,v,rl[b][0],72,rl[b][1],'end');
+      var bl=[['iA',-40],['iB',0],['iC',40]];
+      for(var c=0;c<3;c++)PL(g,v,bl[c][0],bl[c][1],68,'middle');
+      T(g,0,-92,v.label||'IM','comp-label');
+    }
+  },
+  clarke:{
+    // Clarke transform abc -> alphabeta (amplitude invariant, 2/3 scaling).
+    lbl:'CLK',val:'',hitW:180,hitH:160,
+    props:{
+      label:{l:'Reference'},
+      clk_two:{l:'Two inputs only (c = -a-b)',type:'bool',def:false}
+    },
+    pins:[{x:-80,y:-40,n:'IA'},{x:-80,y:0,n:'IB'},{x:-80,y:40,n:'IC'},
+          {x:80,y:-20,n:'ALPHA'},{x:80,y:20,n:'BETA'}],
+    draw(g,v){
+      R(g,-60,-60,120,120,'comp-body');
+      for(var i=0;i<3;i++)L(g,-80,-40+i*40,-60,-40+i*40,'comp-pin');
+      L(g,60,-20,80,-20,'comp-pin');L(g,60,20,80,20,'comp-pin');
+      PL(g,v,'a',-52,-40,'start');PL(g,v,'b',-52,0,'start');
+      var c=PL(g,v,'c',-52,40,'start');if(v.clk_two)c.style.opacity='.35';
+      PL(g,v,'α',52,-20,'end');PL(g,v,'β',52,20,'end');
+      var t=TA(g,0,0,'abc→αβ','comp-label');t.style.fontSize='11px';
+      T(g,0,-72,v.label||'CLK','comp-label');
+    }
+  },
+  park:{
+    // Park transform: alphabeta -> dq (forward) or dq -> alphabeta (inverse),
+    // rotating by the angle at TH [rad].
+    lbl:'PRK',val:'',hitW:180,hitH:180,
+    props:{
+      label:{l:'Reference'},
+      park_dir:{l:'Direction',type:'enum',options:[{v:'fwd',l:'αβ → dq'},{v:'inv',l:'dq → αβ'}]}
+    },
+    pins:[{x:-80,y:-20,n:'IN1'},{x:-80,y:20,n:'IN2'},{x:0,y:80,n:'TH'},
+          {x:80,y:-20,n:'OUT1'},{x:80,y:20,n:'OUT2'}],
+    draw(g,v){
+      var inv=(v.park_dir==='inv');
+      R(g,-60,-60,120,120,'comp-body');
+      L(g,-80,-20,-60,-20,'comp-pin');L(g,-80,20,-60,20,'comp-pin');
+      L(g,0,60,0,80,'comp-pin');
+      L(g,60,-20,80,-20,'comp-pin');L(g,60,20,80,20,'comp-pin');
+      PL(g,v,inv?'d':'α',-52,-20,'start');PL(g,v,inv?'q':'β',-52,20,'start');
+      PL(g,v,inv?'α':'d',52,-20,'end');PL(g,v,inv?'β':'q',52,20,'end');
+      PL(g,v,'θ',0,44,'middle');
+      var t=TA(g,0,-4,inv?'dq→αβ':'αβ→dq','comp-label');t.style.fontSize='11px';
+      T(g,0,-72,v.label||'PRK','comp-label');
+    }
+  },
+  svm:{
+    // Space vector modulation: alphabeta voltage reference -> three duty
+    // signals (centred min/max injection = SVPWM), scaled so that `range`
+    // volts mean 100 % — feed them straight into PWM generator IN pins.
+    lbl:'SVM',val:'',hitW:180,hitH:160,
+    props:{
+      label:{l:'Reference'},
+      svm_vdc:{l:'DC bus voltage Vdc (V)',def:'400'},
+      svm_range:{l:'Output for 100 % duty (V)',def:'1'}
+    },
+    pins:[{x:-80,y:-40,n:'VALPHA'},{x:-80,y:0,n:'VBETA'},{x:-80,y:40,n:'VDC'},
+          {x:80,y:-40,n:'OUTA'},{x:80,y:0,n:'OUTB'},{x:80,y:40,n:'OUTC'}],
+    draw(g,v){
+      R(g,-60,-60,120,120,'comp-body');
+      for(var i=0;i<3;i++){
+        L(g,-80,-40+i*40,-60,-40+i*40,'comp-pin');
+        L(g,60,-40+i*40,80,-40+i*40,'comp-pin');
+      }
+      PL(g,v,'Vα',-52,-40,'start');PL(g,v,'Vβ',-52,0,'start');
+      PL(g,v,'Vdc',-52,40,'start').style.opacity='.6';
+      PL(g,v,'dA',52,-40,'end');PL(g,v,'dB',52,0,'end');PL(g,v,'dC',52,40,'end');
+      // hexagon of the space vector diagram
+      var pts=[];for(var k=0;k<6;k++){var a=Math.PI/3*k;pts.push((14*Math.cos(a)).toFixed(1)+','+(14*Math.sin(a)-8).toFixed(1));}
+      PY(g,pts.join(' '),'comp-body').style.fill='none';
+      var t=TA(g,0,24,'SVM','comp-label');t.style.fontSize='11px';
+      T(g,0,-72,v.label||'SVM','comp-label');
+    }
+  },
+  pi:{
+    // PI controller with output limits and anti-windup (conditional
+    // integration), see piSubckt() in js/netlist.js. out = clamp(Kp*e + Ki*int(e)),
+    // e = REF - FB.
+    lbl:'PI',val:'',hitW:180,hitH:140,
+    props:{
+      label:{l:'Reference'},
+      pi_kp:{l:'Kp',def:'1'},
+      pi_ki:{l:'Ki (1/s)',def:'100'},
+      pi_min:{l:'Output min',def:'-10'},
+      pi_max:{l:'Output max',def:'10'}
+    },
+    pins:[{x:-80,y:-20,n:'REF'},{x:-80,y:20,n:'FB'},{x:80,y:0,n:'OUT'}],
+    draw(g,v){
+      R(g,-60,-40,120,80,'comp-body');
+      L(g,-80,-20,-60,-20,'comp-pin');L(g,-80,20,-60,20,'comp-pin');L(g,60,0,80,0,'comp-pin');
+      PL(g,v,'ref',-52,-20,'start');PL(g,v,'fb',-52,20,'start');
+      var t=TA(g,6,-4,'PI','comp-label');t.style.fontSize='20px';
+      var k=TA(g,6,18,'Kp+Ki/s','comp-label');k.style.fontSize='10px';
+      T(g,0,-52,v.label||'PI','comp-label');
+    }
+  },
+  integrator:{
+    // Integrator: out = K * int(in) dt, starting at 0.
+    lbl:'INT',val:'',hitW:140,hitH:100,
+    props:{
+      label:{l:'Reference'},
+      int_k:{l:'Gain K (1/s)',def:'1'}
+    },
+    pins:[{x:-60,y:0,n:'IN'},{x:60,y:0,n:'OUT'}],
+    draw(g,v){
+      R(g,-40,-30,80,60,'comp-body');
+      L(g,-60,0,-40,0,'comp-pin');L(g,40,0,60,0,'comp-pin');
+      var t=TA(g,0,-2,'∫','comp-label');t.style.fontSize='30px';
+      var k=TA(g,0,20,'K='+(v.int_k||'1'),'comp-label');k.style.fontSize='10px';
+      T(g,0,-42,v.label||'INT','comp-label');
+    }
+  },
+  mathblk:{
+    // Free behavioural function block: OUT = expression of in1, in2, in3 and time.
+    lbl:'FN',val:'',hitW:140,hitH:140,
+    props:{
+      label:{l:'Reference'},
+      fn_expr:{l:'Expression (in1, in2, in3, time)',def:'in1*in2'}
+    },
+    pins:[{x:-60,y:-20,n:'IN1'},{x:-60,y:0,n:'IN2'},{x:-60,y:20,n:'IN3'},{x:60,y:0,n:'OUT'}],
+    draw(g,v){
+      R(g,-40,-40,80,80,'comp-body');
+      for(var i=0;i<3;i++)L(g,-60,-20+i*20,-40,-20+i*20,'comp-pin');
+      L(g,40,0,60,0,'comp-pin');
+      PL(g,v,'1',-32,-20,'start');PL(g,v,'2',-32,0,'start');PL(g,v,'3',-32,20,'start');
+      var t=TA(g,8,-2,'f(x)','comp-label');t.style.fontSize='14px';
+      var e=String(v.fn_expr||'');if(e.length>22)e=e.slice(0,21)+'…';
+      T(g,0,58,e,'comp-value').style.fontSize='11px';
+      T(g,0,-52,v.label||'FN','comp-label');
     }
   },
   npn:{
