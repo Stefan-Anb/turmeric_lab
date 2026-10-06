@@ -323,6 +323,7 @@
         <label class="sim-label">Measurements <span class="sim-sub">(.measure — delays, thresholds, range statistics)</span></label>
         <div id="sim-measure-list" class="sim-measure-list"></div>
         <button id="sim-measure-add-btn" class="tb-btn" style="margin-top:6px;font-size:10px;padding:3px 8px;align-self:flex-start" onclick="openMeasureModal(-1)">+ Add measurement</button>
+        <button class="tb-btn" style="margin-top:6px;font-size:10px;padding:3px 8px;align-self:flex-start" onclick="showMeasureReport()" title="All measurements with their settings and results as a table">Measurement Report</button>
       </div>
       <div class="sim-row">
         <label class="sim-check"><input type="checkbox" id="sim-raw-mode" checked onchange="onRawModeChange()"> Save &amp; list all signals <span class="sim-sub">(saves every device terminal current, so it can be picked afterwards)</span></label>
@@ -347,6 +348,16 @@
     <div class="modal-header">SPICE Netlist<button class="modal-close" onclick="closeNetlist()">&times;</button></div>
     <textarea id="netlist-text" readonly></textarea>
     <button class="tb-btn" onclick="copyNetlist()">Copy to Clipboard</button>
+  </div>
+</div>
+
+<div id="measure-report-modal" class="modal" style="display:none">
+  <div class="modal-content report-modal-content">
+    <div class="modal-header">Measurement Report<button class="modal-close" onclick="closeMeasureReport()">&times;</button></div>
+    <div id="measure-report-body" class="report-body"></div>
+    <div class="report-footer">
+      <button class="tb-btn" onclick="copyMeasureReport()" title="Copy as tab-separated text (pastes into a spreadsheet)">Copy table</button>
+    </div>
   </div>
 </div>
 

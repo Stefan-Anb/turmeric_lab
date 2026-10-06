@@ -1043,6 +1043,7 @@ function measureSummary(m){
 }
 
 function renderMeasureList(){
+  if(typeof measureReportOpen==='function'&&measureReportOpen())renderMeasureReport();
   var host=document.getElementById('sim-measure-list');
   if(!host)return;
   var addBtn=document.getElementById('sim-measure-add-btn');
@@ -1083,6 +1084,89 @@ function renderMeasureList(){
     });
   });
 }
+
+// ═══ MEASUREMENT REPORT — all measurements as one table ═══
+// Rows are {name,type,signals,cond,result,resultCls,enabled}; shared by the
+// dialog and the "Copy table" text export.
+function measureReportRows(){
+  var kwDisabled=!measureAnalysisKeyword();
+  return simMeasurements.map(function(m){
+    var row={name:m.name||'?',enabled:m.enabled!==false,type:'',signals:'',cond:[]};
+    function add(label,v){if(v!==undefined&&v!==null&&String(v)!=='')row.cond.push(label+': '+v);}
+    if(m.kind==='find_at'){
+      var fa=m.findAt||{};
+      row.type='Find at';row.signals=fa.expr||'?';
+      add('At',fa.at);
+    }else if(m.kind==='find_when'){
+      var fw=m.findWhen||{};
+      row.type='Find when';row.signals=(fw.expr||'?')+'  when  '+(fw.whenSig||'?')+' = '+(fw.whenVal||'?');
+      add('Edge',fw.edge);add('Count',fw.count);add('Delay',fw.td);
+    }else if(m.kind==='trig_targ'){
+      var tt=m.trigTarg||{};
+      row.type='Delay (trig → targ)';
+      row.signals=(tt.trigSig||'?')+' → '+(tt.targSig||'?');
+      add('Trig',[tt.trigVal&&('= '+tt.trigVal),tt.trigEdge,tt.trigCount&&('#'+tt.trigCount),tt.trigTd&&('td '+tt.trigTd)].filter(Boolean).join(' '));
+      add('Targ',[tt.targVal&&('= '+tt.targVal),tt.targEdge,tt.targCount&&('#'+tt.targCount),tt.targTd&&('td '+tt.targTd)].filter(Boolean).join(' '));
+    }else{
+      var st=m.stat||{};
+      row.type='Statistic '+(st.func||'PP');row.signals=st.sig||'?';
+      add('From',st.from||'start');add('To',st.to||'end');
+    }
+    if(kwDisabled){row.result='needs tran/dc/ac';row.resultCls='none';}
+    else if(!row.enabled){row.result='disabled';row.resultCls='none';}
+    else if(!m.result){row.result='—';row.resultCls='none';}
+    else if(m.result.ok){row.result=fmtEng(m.result.value,5);row.resultCls='';}
+    else{row.result=m.result.raw||'failed';row.resultCls='failed';}
+    return row;
+  });
+}
+
+function renderMeasureReport(){
+  var host=document.getElementById('measure-report-body');
+  if(!host)return;
+  if(!simMeasurements.length){
+    host.innerHTML='<div class="report-empty">No measurements yet — add one in the simulation settings.</div>';
+    return;
+  }
+  var html='<table class="report-table"><thead><tr><th>Name</th><th>Type</th><th>Signal(s)</th><th>Settings</th><th style="text-align:right">Result</th></tr></thead><tbody>';
+  measureReportRows().forEach(function(r){
+    html+='<tr class="'+(r.enabled?'':'report-off')+'">'+
+      '<td class="report-name">'+esc(r.name)+'</td>'+
+      '<td>'+esc(r.type)+'</td>'+
+      '<td class="report-sig">'+esc(r.signals)+'</td>'+
+      '<td class="report-cond">'+(r.cond.length?r.cond.map(esc).join('<br>'):'—')+'</td>'+
+      '<td class="report-result '+r.resultCls+'">'+esc(r.result)+'</td></tr>';
+  });
+  host.innerHTML=html+'</tbody></table>';
+}
+
+function measureReportOpen(){
+  var m=document.getElementById('measure-report-modal');
+  return !!m&&m.style.display!=='none';
+}
+function showMeasureReport(){
+  var modal=document.getElementById('measure-report-modal');
+  if(!modal)return;
+  renderMeasureReport();
+  modal.style.display='flex';
+  modal.onclick=function(e){if(e.target===modal)closeMeasureReport();};
+}
+function closeMeasureReport(){
+  var modal=document.getElementById('measure-report-modal');
+  if(modal)modal.style.display='none';
+}
+function copyMeasureReport(){
+  var lines=['Name\tType\tSignal(s)\tSettings\tResult'];
+  measureReportRows().forEach(function(r){
+    lines.push([r.name,r.type,r.signals,r.cond.join('; '),r.result].join('\t'));
+  });
+  var text=lines.join('\n');
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(text).then(function(){hint('Measurement table copied');},function(){hint('Copy failed');});
+  else hint('Clipboard not available');
+}
+document.addEventListener('keydown',function(e){
+  if(e.key==='Escape'&&measureReportOpen())closeMeasureReport();
+});
 
 function removeMeasurement(i){
   simMeasurements.splice(i,1);
