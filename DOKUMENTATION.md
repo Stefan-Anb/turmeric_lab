@@ -218,6 +218,8 @@ zunächst feste Modellkarten und durchläuft dann `S.components` in einer große
 | source AC | `V<ref> n1 n2 SIN(vo va f td theta phi)` | `SIN(...)` ist Transientenform, nicht `.ac` | funktional ok, Bezeichnung "AC" irreführend |
 | source PULSE | `V<ref> n1 n2 PULSE(...)` | ok (7 bis 8 Parameter) | ok |
 | source BEHAV | `E/G<ref> n1 n2 cur = '<eq>'` | E braucht `vol=`, G braucht `cur=` | **falsch für E** (3.2 #2) |
+| source RAMP *(neu)* | `V/I<ref> n1 n2 PWL(0 s [td s] {td+dur} e)` | `PWL(t1 v1 t2 v2 ...)`, Zeiten strikt steigend | ok; Haltepunkt bei `td` entfällt, wenn TDelay 0 ist; Duration 0 ergibt einen ngspice-Fehler |
+| source DC, Show = Current, Load mode *(neu)* | `B<ref> n1 n2 I = '(I)*min(max(v(n1,n2)/0.05,0),1)'` | B-Quelle mit `I=` | ok; Strom fließt nur bei v(n+,n-) > 0 (weiches 50-mV-Knie), analog LTspice "load" |
 | diode/led | `D<label> nA nK <model>` | `Dxxx n+ n- model` | Pinreihenfolge ok; Modell- und Präfixproblem (3.2) |
 | npn/pnp | `Q<label> nC nB nE <model>` | `Qxxx nc nb ne model` | Pinreihenfolge **korrekt** |
 | nmos/pmos | `M<label> nD nG nS <model>` | VDMOS: `Mxxx nd ng ns model` (3 Pins) | Pinreihenfolge und 3-Pin-Form **korrekt** für VDMOS |
@@ -228,6 +230,8 @@ zunächst feste Modellkarten und durchläuft dann `S.components` in einer große
 | scr *(neu 2026-08-14)* | `X<label> nA nG nK scr_<ref>` + verhaltensbasierter `.subckt` | `Xxxx nodes subckt` | ok; Latch-Modell, siehe 3.4 |
 | pwmgen *(neu 2026-08-14)* | `X<label> IN OUTH COMH OUTL COML pwmgen_<ref>` + `.subckt` | `Xxxx nodes subckt` | ok; B-Source-Modell, siehe 3.4 |
 | indmotor / clarke / park / svm / pi / integrator / mathblk *(Motor Control)* | `X<label> <Pins in CD-Reihenfolge> <typ>_<ref>` + `.subckt` | `Xxxx nodes subckt` | ok; B-Source-Modelle, siehe 3.5 |
+
+**Quellen-Properties (`CD.source`).** `meas` (V/I) schaltet im Properties-Panel die Beschriftungen um ("(V)" wird "(A)", "Voltage" wird "Current", `Vinitial`/`Von` werden `Iinitial`/`Ion`), siehe `renderProps()` in `js/app.js`. Props können neben `modes` auch `meas:['I']` tragen und erscheinen dann nur bei dieser Messgröße (genutzt für `load`). Die SPICE-Präfixe stehen in `buildSpiceRefMap()`; `B` kommt nur beim Load-Modus vor und wird bei der `.save`-Liste wie `I`/`G` behandelt (`@ref[i]`).
 
 ### 3.4 Zusammengesetzte Bauteile (Modellkarten und Subcircuits)
 

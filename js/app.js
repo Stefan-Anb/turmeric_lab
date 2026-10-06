@@ -447,7 +447,7 @@ function renderProps(){
     if(pd0 && pd0.modes && !pd0.modes.includes(curMode)) continue;
     if(pd0 && pd0.meas && !pd0.meas.includes(comp.meas||'V')) continue;
     // Sources: "(V)" in a label becomes "(A)" for a current source.
-    const pd=(comp.type==='source'&&comp.meas==='I'&&pd0.l)?Object.assign({},pd0,{l:pd0.l.replace(/\(V\)/g,'(A)').replace(/^Voltage/,'Current')}):pd0;
+    const pd=(comp.type==='source'&&comp.meas==='I'&&pd0.l)?Object.assign({},pd0,{l:pd0.l.replace(/\(V\)/g,'(A)').replace(/^Voltage/,'Current').replace(/^V(initial|on)\b/,'I$1')}):pd0;
     const val=comp[key]||'';
     if(pd.type==='enum'&&Array.isArray(pd.options)){
       html+='<div class="prop-row"><div class="prop-lbl">'+pd.l+'</div><div style="padding:6px 12px;display:flex;gap:8px;align-items:center">';
@@ -2031,11 +2031,9 @@ function newSchematic(){
   saveSchematic(); // flush the file we are leaving
   var id=createInternalFile('Untitled',null);
   setCurrentFile(id);
-  S.components=[];S.wires=[];S.junctions=[];S.selected=[];S.nextId=1;S.probes=[];
+  applyState({components:[],wires:[],junctions:[],nextId:1,customComponents:{},probes:[]},{applySim:true});
   view.x=0;view.y=0;view.zoom=1;
-  customComponents={};
   cancelWire();applyView();renderAll();renderProps();
-  renderCustomCompsList();
   clearHistory(); pushState();
   saveSchematic();
 }
@@ -2061,6 +2059,8 @@ function collectState(){
       formulas:(typeof simFormulas!=='undefined')?simFormulas:undefined,
       directives:simDirEl?simDirEl.value:'',
       saveAll:(typeof getRawMode==='function')?getRawMode():undefined,
+      // .measure statements; `result` is transient and never stored.
+      measurements:(typeof simMeasurements!=='undefined')?simMeasurements.map(function(m){var c={};for(var k in m)if(k!=='result')c[k]=m[k];return c;}):undefined,
       probes:S.probes||[],
       powerAnalyzer:(typeof paConfig!=='undefined'&&paConfig)?paConfig:undefined
     }
@@ -2085,6 +2085,7 @@ function applyState(state,opts){
   customComponents=state.customComponents||{};
   mergeCustomComponents();
   renderCustomCompsList();
+  if(opts.applySim&&typeof resetSimForSchematic==='function')resetSimForSchematic(!state.sim);
   if(opts.applySim&&state.sim){
     var sim=state.sim;
     if(sim.analysis&&typeof simAnalysis!=='undefined'){
@@ -2094,6 +2095,10 @@ function applyState(state,opts){
       if(sim.analysis.ac)for(var ka in sim.analysis.ac)simAnalysis.ac[ka]=sim.analysis.ac[ka];
     }
     if(Array.isArray(sim.formulas)&&typeof simFormulas!=='undefined')simFormulas=sim.formulas;
+    if(typeof simMeasurements!=='undefined'){
+      simMeasurements=Array.isArray(sim.measurements)?sim.measurements:[];
+      simMeasurements.forEach(function(m){var n=parseInt(String(m.id||'').replace(/^m/,''),10);if(!isNaN(n)&&n>=MEASURE_NEXT_ID)MEASURE_NEXT_ID=n+1;});
+    }
     var simDirEl2=document.getElementById('sim-directives');
     if(simDirEl2)simDirEl2.value=sim.directives||'';
     var saveAllEl=document.getElementById('sim-raw-mode');
@@ -2108,6 +2113,7 @@ function applyState(state,opts){
     if(typeof renderAnalysisPanel==='function')renderAnalysisPanel();
     if(typeof renderFormulaList==='function')renderFormulaList();
     if(typeof renderProbeList==='function')renderProbeList();
+    if(typeof renderMeasureList==='function')renderMeasureList();
   }
 }
 

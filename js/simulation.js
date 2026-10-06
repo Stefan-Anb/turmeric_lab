@@ -573,6 +573,36 @@ function stopSimulation(){
   endRunUI();
 }
 
+// Called when the editor switches to a different schematic (new / opened from
+// the library / imported): everything tied to the old one's last run is
+// dropped, so the plot, signal list and .measure results never show data of a
+// schematic that is no longer open. `resetSetup` (schematic without a stored
+// simulation setup, e.g. a fresh one) also returns analysis/formulas/directives
+// to their defaults instead of inheriting the previous schematic's.
+function resetSimForSchematic(resetSetup){
+  if(simRunPending)stopSimulation();
+  simLastResult=null;simLastInfoText='';
+  simSelection={};simSelectionAuto=false;
+  simSeriesColor={};simColorAssign={};
+  simYFit=null;simYFit2=null;
+  simCursors=[];
+  if(typeof closeMeasureModal==='function')closeMeasureModal();
+  simMeasurements.forEach(function(m){delete m.result;});
+  if(resetSetup){
+    simAnalysis.type='tran';
+    simAnalysis.tran={tstep:'10u',tstop:'5m',tstart:'',tmax:'',uic:false,trtol:'7'};
+    simAnalysis.dc={src:'',start:'0',stop:'5',step:'0.1',use2:false,src2:'',start2:'0',stop2:'5',step2:'1'};
+    simAnalysis.ac={sweep:'dec',pts:'20',fstart:'1',fstop:'1Meg'};
+    simFormulas=[];
+    simMeasurements=[];
+    var d=document.getElementById('sim-directives');if(d)d.value='';
+    saveSimSettings();
+  }
+  showSimPlotPlaceholder('No simulation run yet.');
+  simStatus('Idle.');
+  if(simPanelOpen){renderAnalysisPanel();renderFormulaList();renderProbeList();renderMeasureList();}
+}
+
 // The plot pane pops up (if it wasn't already) the instant Run is pressed —
 // with a "Simulating…" placeholder, not stale data from a previous run — and
 // gets filled the instant the worker's result message arrives.
@@ -2402,11 +2432,13 @@ function resizeSimPlot(){
   var c=document.getElementById('sim-plot');
   if(!simPlot||!c)return;
   // The legend is part of uPlot's DOM but not of its canvas height, so take it
-  // off the container height or the x axis is pushed out of view.
+  // off the container height or the x axis is pushed out of view. Its height
+  // depends on the width (it wraps), so set the width first and measure after.
+  var w=Math.max(120,c.clientWidth);
+  if(simPlot.width!==w)simPlot.setSize({width:w,height:simPlot.height});
   var lg=c.querySelector('.u-legend');
-  var w=Math.max(120,c.clientWidth),h=Math.max(60,c.clientHeight-(lg?lg.offsetHeight:0)-2);
-  if(simPlot.width===w&&simPlot.height===h)return;
-  simPlot.setSize({width:w,height:h});
+  var h=Math.max(60,c.clientHeight-(lg?lg.offsetHeight:0)-2);
+  if(simPlot.height!==h)simPlot.setSize({width:w,height:h});
 }
 window.addEventListener('resize',function(){
   if(simViewActive&&simPlot)resizeSimPlot();
