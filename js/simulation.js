@@ -1199,6 +1199,25 @@ function showMeasureModalWarning(msg){
   if(el)el.textContent=msg;
 }
 
+// Drops the canvas probe (and its plotted vector) that stands for `vec`, if any.
+// Only probes are touched — a signal ticked by hand in the picker stays.
+function removeProbeForVector(vec){
+  if(!S.probes||!S.probes.length)return;
+  var want=String(vec).toLowerCase().replace(/\s+/g,'');
+  var map=simLastResult?vectorMapOf(simLastResult):null;
+  for(var i=0;i<S.probes.length;i++){
+    var pr=S.probes[i],key;
+    if(pr.kind==='V')key='v('+pr.net+')';
+    else if(pr.kind==='Vd')key='v('+pr.p+')-v('+pr.n+')';
+    else key=probeVectorKey(pr,map);
+    if(key&&String(key).toLowerCase().replace(/\s+/g,'')===want){
+      S.probes.splice(i,1);
+      setSelected(String(key).toLowerCase(),false);
+      return;
+    }
+  }
+}
+
 function feedProbeToMeasureModal(pr){
   if(!simMeasureDraft)return;
   var d=simMeasureDraft.data;
@@ -1225,6 +1244,19 @@ function feedProbeToMeasureModal(pr){
     return;
   }
   var p=path.split('.');
+  // The signal this field held before was (most likely) put on the plot by an
+  // earlier probe click — replacing it should take it off again instead of
+  // leaving a stale curve behind. Skipped when another field of the same
+  // measurement still uses it.
+  var oldVec=d[p[0]][p[1]];
+  if(oldVec&&String(oldVec).toLowerCase()!==vec.toLowerCase()){
+    var stillUsed=fields.some(function(f){
+      if(f===path)return false;
+      var q=f.split('.');
+      return String(d[q[0]][q[1]]||'').toLowerCase()===String(oldVec).toLowerCase();
+    });
+    if(!stillUsed)removeProbeForVector(oldVec);
+  }
   d[p[0]][p[1]]=vec;
   // Advance to the next signal field of this kind (trig -> targ, expr -> when-
   // signal), so a second probe click fills the next slot without having to
@@ -1514,7 +1546,13 @@ function renderMeasureModal(){
       }
       dd.classList.add('open');
     }
-    inp.addEventListener('focus',function(){simMeasureActiveSigPath=path;renderDropdown();});
+    inp.addEventListener('focus',function(){
+      simMeasureActiveSigPath=path;
+      renderDropdown();
+      // Clicking into a signal field means "pick this signal" — go straight to
+      // probe mode so the next click on the schematic fills it.
+      if(typeof setMode==='function'&&S.mode!=='probe')setMode('probe');
+    });
     inp.addEventListener('input',renderDropdown);
     // A blur right after clicking a dropdown item would hide it before the
     // click lands — the mousedown handler below preventDefaults that click's
