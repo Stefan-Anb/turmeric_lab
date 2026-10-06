@@ -17,7 +17,7 @@
 
 [library]
 name = "TurmericLab Schematic Library"
-version = "1.2.0"   # Version der gesamten Bibliothek, bei jeder Aenderung erhoehen
+version = "1.3.0"   # Version der gesamten Bibliothek, bei jeder Aenderung erhoehen
 
 [[schematic]]
 file = "rc_lowpass.svg"           # Dateiname relativ zu library/
@@ -35,4 +35,16 @@ version = "1.0.0"
 file = "current_source.svg"
 name = "Current Source Examples"
 description = "Independent current source into a resistor: DC (1 mA into 1k = 1 V), pulse into 1k || 100n (RC charging, tau = 100 us) and ramp. Transient analysis preset with voltage and current probes."
+version = "1.0.0"
+
+[[schematic]]
+file = "param_load_sweep.svg"
+name = "Parameter Sweep: Load-Mode Current Source"
+description = "DC sweep of V1 into a load-mode current source whose current is the swept parameter Il (5m 10m 20m 40m): one curve per Il, plus a vmax measurement plotted over Il in the Measurement Report."
+version = "1.0.0"
+
+[[schematic]]
+file = "param_rc_sweep.svg"
+name = "Parameter Sweep: RC Rise Time"
+description = "RC step response with the resistor as a decade-swept parameter Rv (1k..100k). Transient family of curves plus the 10-90% rise time measurement plotted over Rv (log x) in the Measurement Report."
 version = "1.0.0"

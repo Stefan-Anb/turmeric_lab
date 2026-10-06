@@ -631,7 +631,133 @@ function buildSaveLine(){
   return '.save all'+(v.length?' '+v.join(' '):'');
 }
 
-function generateNetlist(){
+// ═══ PARAMETERS (.param) AND PARAMETER STEPS ═══
+// S.params is the list edited in the Parameters dialog (js/params.js):
+//   {id, name, value, step:{on, type:'lin'|'dec'|'oct'|'list', start, stop, inc, pts, list}}
+// A static parameter becomes one ".param name=value" line; any component value
+// can then use "{name}" (ngspice resolves it). A parameter with step.on is
+// swept: the app does not rely on ngspice's .step (the WASM engine only hands
+// back the first plot of a multi-plot raw file) but runs one complete
+// simulation per value itself and overrides the parameter's .param line for
+// each run — see buildStepPlan() and runSimulation() in js/simulation.js.
+var PARAM_NAME_RE=/^[A-Za-z_][A-Za-z0-9_]*$/;
+var PARAM_MAX_VALUES=1000;   // per swept parameter
+var PARAM_MAX_RUNS=500;      // product over all swept parameters
+
+// "{name}" must not be nested inside another "{...}" expression — strip the
+// braces where a user value is spliced into one (ramp PWL times, transformer L).
+function stripBraces(v){return String(v).replace(/[{}]/g,'');}
+function lowerKeys(o){var r={};for(var k in o)r[k.toLowerCase()]=o[k];return r;}
+
+// Numbers go into the deck as plain JS numbers (1e-7, 0.0047), never as the
+// locale- or prefix-dependent display strings.
+function paramNumStr(v){return String(+Number(v).toPrecision(10));}
+
+// Values of one swept parameter -> {ok, values:[number], error}.
+function paramStepValues(p){
+  var st=p&&p.step;
+  if(!st||!st.on)return {ok:true,values:[]};
+  function bad(msg){return {ok:false,values:[],error:'Parameter "'+(p.name||'?')+'": '+msg};}
+  var out=[],n,k;
+  if(st.type==='list'){
+    var toks=String(st.list||'').split(/[\s,;]+/).filter(Boolean);
+    if(!toks.length)return bad('the value list is empty.');
+    for(k=0;k<toks.length;k++){
+      var lv=parseEngNumber(toks[k]);
+      if(!isFinite(lv))return bad('"'+toks[k]+'" is not a number.');
+      out.push(lv);
+    }
+  }else{
+    var a=parseEngNumber(st.start),b=parseEngNumber(st.stop);
+    if(!isFinite(a)||!isFinite(b))return bad('start and stop must be numbers.');
+    if(st.type==='lin'){
+      var inc=parseEngNumber(st.inc);
+      if(!isFinite(inc)||inc===0)return bad('the increment must be a non-zero number.');
+      if((inc>0&&b<a)||(inc<0&&b>a))return bad('the increment points away from the stop value.');
+      n=Math.floor((b-a)/inc+1e-9)+1;
+      if(n>PARAM_MAX_VALUES)return bad('more than '+PARAM_MAX_VALUES+' steps.');
+      for(k=0;k<n;k++)out.push(a+k*inc);
+    }else{   // 'dec' | 'oct'
+      var pts=parseInt(st.pts,10);
+      if(!(pts>=1))return bad('points per '+(st.type==='dec'?'decade':'octave')+' must be at least 1.');
+      if(!(a>0)||b<a)return bad('a logarithmic step needs 0 < start <= stop.');
+      var base=st.type==='dec'?10:2;
+      n=Math.floor(pts*Math.log(b/a)/Math.log(base)+1e-9)+1;
+      if(n>PARAM_MAX_VALUES)return bad('more than '+PARAM_MAX_VALUES+' steps.');
+      for(k=0;k<n;k++)out.push(a*Math.pow(base,k/pts));
+    }
+  }
+  return {ok:true,values:out};
+}
+
+function paramDefs(){return Array.isArray(S.params)?S.params:[];}
+function paramDefNames(){
+  var m={};
+  paramDefs().forEach(function(p){if(p.name)m[String(p.name).toLowerCase()]=true;});
+  return m;
+}
+
+// The value a parameter takes outside a stepped run (NETLIST view, plain run).
+function paramNominal(p){
+  if(p.step&&p.step.on){
+    var sv=paramStepValues(p);
+    if(sv.ok&&sv.values.length)return paramNumStr(sv.values[0]);
+  }
+  return (p.value!=null&&String(p.value).trim()!=='')?String(p.value).trim():'0';
+}
+
+// `.param` lines of the Parameters dialog. `over` maps lower-case name -> value
+// string for the swept parameters of the current run.
+function buildParamLines(over){
+  var lines=[];
+  paramDefs().forEach(function(p){
+    var name=String(p.name||'').trim();
+    if(!name||!PARAM_NAME_RE.test(name))return;
+    var ov=over&&over[name.toLowerCase()];
+    lines.push('.param '+name+'='+(ov!=null?ov:paramNominal(p)));
+  });
+  return lines;
+}
+
+// All runs of a simulation: the cartesian product of the swept parameters, the
+// first parameter in dialog order being the outermost loop. Without a swept
+// parameter this is the single ordinary run.
+//   -> {ok, error, names:[swept names], runs:[{assign:{name:{num,str}}}]}
+function buildStepPlan(){
+  var swept=[],seen={};
+  var defs=paramDefs();
+  for(var i=0;i<defs.length;i++){
+    var p=defs[i],name=String(p.name||'').trim();
+    if(!name)continue;
+    if(!PARAM_NAME_RE.test(name))return {ok:false,error:'Parameter name "'+name+'" is not valid (letters, digits, underscore; no leading digit).'};
+    if(seen[name.toLowerCase()])return {ok:false,error:'Parameter "'+name+'" is defined twice.'};
+    seen[name.toLowerCase()]=true;
+    if(p.step&&p.step.on){
+      var sv=paramStepValues(p);
+      if(!sv.ok)return {ok:false,error:sv.error};
+      swept.push({name:name,values:sv.values});
+    }
+  }
+  var runs=[{assign:{}}];
+  swept.forEach(function(sp){
+    var next=[];
+    runs.forEach(function(r){
+      sp.values.forEach(function(v){
+        var a={};for(var k in r.assign)a[k]=r.assign[k];
+        a[sp.name]={num:v,str:paramNumStr(v)};
+        next.push({assign:a});
+      });
+    });
+    runs=next;
+    if(runs.length>PARAM_MAX_RUNS)runs=runs.slice(0,PARAM_MAX_RUNS+1);
+  });
+  if(runs.length>PARAM_MAX_RUNS)return {ok:false,error:'The parameter steps give more than '+PARAM_MAX_RUNS+' runs — reduce the number of values.'};
+  return {ok:true,names:swept.map(function(s){return s.name;}),runs:runs};
+}
+
+// `opts.paramValues` ({name -> value string}) overrides swept parameters for one
+// run of a parameter sweep; without it they sit at their first value.
+function generateNetlist(opts){
   tempNetNamesGen={};
   tempNetCounterGen=0;
   getTempNetName(S.wires.length>0?S.wires[0].id:null);
@@ -658,14 +784,30 @@ function generateNetlist(){
   // component's value field can reference "{name}" and have ngspice resolve
   // it. Duplicate names are emitted as-is; ngspice itself will error on that,
   // surfaced through the usual sim log like any other netlist mistake.
+  // A parameter of the Parameters dialog wins over a PARAM component of the
+  // same name (a duplicate .param would otherwise make ngspice complain).
+  var dlgNames=paramDefNames();
+  var paramOver=(opts&&opts.paramValues)?lowerKeys(opts.paramValues):null;
+  var nParamLines=0;
   for(var pi=0;pi<S.components.length;pi++){
     var pc=S.components[pi];
     if(pc.type!=='param')continue;
     var pname=(pc.label||'').trim();
-    if(!pname)continue;
+    if(!pname||dlgNames[pname.toLowerCase()])continue;
     lines.push('.param '+pname+'='+((pc.value!=null&&pc.value!=='')?pc.value:'0'));
+    nParamLines++;
   }
-  if(present.param)lines.push('');
+  var dlgLines=buildParamLines(paramOver);
+  dlgLines.forEach(function(l){lines.push(l);nParamLines++;});
+  if(!paramOver){
+    // plain netlist view: say which parameters are swept in a real run
+    paramDefs().forEach(function(p){
+      if(!(p.step&&p.step.on)||!p.name)return;
+      var sv=paramStepValues(p);
+      lines.push('* swept: '+p.name+(sv.ok?' ('+sv.values.length+' values, first one shown)':' (invalid step setup)'));
+    });
+  }
+  if(nParamLines)lines.push('');
   if(present.sw)lines.push('.model defaultswitch sw vt=1 vh=0.2 ron=1u roff=1e+12');
   if(present.diode||present.led)lines.push('.model defaultdiode D');
   if(present.npn)lines.push('.model npn_default NPN ( IS=1e-14 BF=200 NF=1 VAF=100 IKF=0.3 ISE=1e-13 NE=1.5 BR=5 NR=1 VAR=20 IKR=0.1 ISC=1e-13 NC=2 RE=0.5 RC=0.5 RB=10 CJE=2e-12 VJE=0.75 MJE=0.33 CJC=1e-12 VJC=0.6 MJC=0.33 TF=0.5e-9 TR=50e-9 XTB=1.5 EG=1.11 XTI=3 KF=1e-15 AF=1 )');
@@ -704,7 +846,7 @@ function generateNetlist(){
       var uRatio=(c.u!=null&&c.u!=='')?c.u:'1';
       var kCoup=(c.k!=null&&c.k!=='')?c.k:'1';
       lines.push('L'+traf+'P '+tNets[0]+' '+tNets[1]+' '+lp);
-      lines.push('L'+traf+'S '+tNets[2]+' '+tNets[3]+' {('+lp+')*('+uRatio+')*('+uRatio+')}');
+      lines.push('L'+traf+'S '+tNets[2]+' '+tNets[3]+' {('+stripBraces(lp)+')*('+stripBraces(uRatio)+')*('+stripBraces(uRatio)+')}');
       lines.push('K'+traf+' L'+traf+'P L'+traf+'S '+kCoup);
       continue;
     }
@@ -745,7 +887,7 @@ function generateNetlist(){
         var rdur=c.ramp_duration||'1m';
         // PWL times must strictly increase, so skip the hold point without a delay.
         var hasDelay=String(rtd).trim()!==''&&!/^[+-]?0*\.?0*(e[+-]?\d+)?$/i.test(String(rtd).trim());
-        line=dev+' '+net1+' '+net2+(acSpec?' '+acSpec:'')+' PWL(0 '+r0+(hasDelay?' '+rtd+' '+r0:'')+' {('+rtd+')+('+rdur+')} '+r1+')';
+        line=dev+' '+net1+' '+net2+(acSpec?' '+acSpec:'')+' PWL(0 '+r0+(hasDelay?' '+rtd+' '+r0:'')+' {('+stripBraces(rtd)+')+('+stripBraces(rdur)+')} '+r1+')';
       }else if(mode==='AC'){
         var vo=c.ac_offset||'0';
         var va=c.ac_amplitude||'1';

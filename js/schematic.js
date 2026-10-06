@@ -9,6 +9,7 @@ let S={
   components:[], wires:[], junctions:[],
   selected:[], nextId:1, waypoints:[],
   probes:[], // selected net names (lowercase) to plot, chosen via probe mode
+  params:[], // .param definitions / sweeps of the Parameters dialog (see netlist.js, js/params.js)
   wire:{drawing:false,startPt:null,startConn:null,waypoints:[],startDir:null,forceOpen:null},
   drag:{active:false,target:null,sm:null,sp:null,moved:false},
   buffer:null,

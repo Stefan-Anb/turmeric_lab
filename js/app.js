@@ -381,6 +381,8 @@ function updateStatus(){
 }
 
 // ═══ PROPERTIES PANEL ═══
+// Property keys that never take a numeric value, hence get no parameter button.
+var PARAM_BTN_SKIP_KEYS=['label','text','model','part'];
 function renderProps(){
   // The simulation settings share the properties panel. They stay in front only
   // while nothing is selected — selecting a component hands the panel back to
@@ -467,8 +469,13 @@ function renderProps(){
       '<textarea class="prop-input" data-key="'+key+'" rows="6">'+esc(String(val))+'</textarea></div>';
     } else {
       const ph=pd.def!=null?' placeholder="'+esc(String(pd.def))+'"':'';
-      html+='<div class="prop-row"><div class="prop-lbl">'+pd.l+'</div>'+
-      '<input class="prop-input" data-key="'+key+'" type="text" value="'+esc(String(val))+'"'+ph+'/></div>';
+      var inpHtml='<input class="prop-input" data-key="'+key+'" type="text" value="'+esc(String(val))+'"'+ph+'/>';
+      // Value-like fields get a ƒ button that inserts a {parameter} (js/params.js);
+      // names, labels and model references are not numeric values.
+      if(PARAM_BTN_SKIP_KEYS.indexOf(key)<0){
+        inpHtml='<div class="prop-input-wrap">'+inpHtml+'<button type="button" class="prop-param-btn" data-pbtn="'+key+'" title="Insert a parameter ({name})">ƒ</button></div>';
+      }
+      html+='<div class="prop-row"><div class="prop-lbl">'+pd.l+'</div>'+inpHtml+'</div>';
     }
   }
   // properties apply immediately on change — no Apply button
@@ -493,6 +500,13 @@ function renderProps(){
       // Don't re-render the props panel on every keystroke (that steals focus).
       // Only re-render if this input explicitly requires it (none do here).
     });
+  });
+  // ƒ buttons: pick a parameter for the neighbouring value field
+  pc.querySelectorAll('.prop-param-btn').forEach(function(btn){
+    var inp=pc.querySelector('.prop-input[data-key="'+btn.getAttribute('data-pbtn')+'"]');
+    // mousedown must not take the focus (and the caret) away from the field
+    btn.addEventListener('mousedown',function(e){e.preventDefault();});
+    btn.addEventListener('click',function(){if(inp&&typeof openParamMenu==='function')openParamMenu(btn,inp);});
   });
   // radio enums
   pc.querySelectorAll('input[type=radio][data-key]').forEach(function(r){
@@ -2052,6 +2066,8 @@ function collectState(){
     // function; mergeCustomComponents() rebuilds a generic one on import.
     customComponents:customComponents,
     probes:S.probes||[],
+    // Parameters dialog: .param definitions and sweeps (schematic-level data).
+    params:S.params||[],
     // Full simulation setup, including the analysis params of modes that
     // aren't currently selected, so switching modes never loses their config.
     sim:{
@@ -2060,7 +2076,7 @@ function collectState(){
       directives:simDirEl?simDirEl.value:'',
       saveAll:(typeof getRawMode==='function')?getRawMode():undefined,
       // .measure statements; `result` is transient and never stored.
-      measurements:(typeof simMeasurements!=='undefined')?simMeasurements.map(function(m){var c={};for(var k in m)if(k!=='result')c[k]=m[k];return c;}):undefined,
+      measurements:(typeof simMeasurements!=='undefined')?simMeasurements.map(function(m){var c={};for(var k in m)if(k!=='result'&&k!=='results')c[k]=m[k];return c;}):undefined,
       probes:S.probes||[],
       powerAnalyzer:(typeof paConfig!=='undefined'&&paConfig)?paConfig:undefined
     }
@@ -2078,6 +2094,7 @@ function applyState(state,opts){
   S.junctions=state.junctions||[];
   S.nextId=state.nextId||1;
   S.selected=[];
+  S.params=Array.isArray(state.params)?state.params:[];
   S.probes=Array.isArray(state.probes)?state.probes:((state.sim&&Array.isArray(state.sim.probes))?state.sim.probes:[]);
   // Inline custom-component defs are this schematic's own — replace
   // wholesale (like S.components etc. above), independent of whatever

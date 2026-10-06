@@ -23,6 +23,14 @@
 
 var simPlot=null;         // current uPlot instance
 var simLastResult=null;   // last result, for re-plot when probe selection changes
+// Parameter sweep (see buildStepPlan() in js/netlist.js). One run per combination
+// of the swept parameters; simLastResult is then the FIRST run's result (so
+// everything that works on "a result" keeps working) and simRuns holds all of
+// them: {names:[swept param names], runs:[{assign,label,result,info,meas}]}.
+// null for an ordinary single run.
+var simRuns=null;
+var simPlan=null;         // {runs:[{assign,netlist}], i, done:[]} while a run (sweep) is in flight
+var simRunT0=0;           // start of the whole run (sweep), for the elapsed-time ticker
 // The plotted signals are one single selection: a map of result-vector names
 // (lowercase) -> true. Canvas probes and the vector picker are two ways of
 // editing the same set, and it survives across simulation runs — a new run only
@@ -102,7 +110,7 @@ function saveSimSettings(){
     localStorage.setItem('sim_settings',JSON.stringify({
       analysis:simAnalysis,formulas:simFormulas,
       measurements:simMeasurements.map(function(m){
-        var c={};for(var k in m)if(k!=='result')c[k]=m[k];return c;
+        var c={};for(var k in m)if(k!=='result'&&k!=='results')c[k]=m[k];return c;
       }),
       directives:d?d.value:'',saveAll:getRawMode()
     }));
@@ -317,10 +325,11 @@ function preloadSimEngine(){
 // and for how long, instead of a frozen "Simulating…".
 function startSimTicker(){
   stopSimTicker();
-  var t0=(typeof performance!=='undefined'?performance.now():Date.now());
+  var t0=simRunT0||(typeof performance!=='undefined'?performance.now():Date.now());
   simTicker=setInterval(function(){
     var now=(typeof performance!=='undefined'?performance.now():Date.now());
-    simStatus('Simulating… ('+fmtEng((now-t0)/1000,2,'s')+')');
+    var step=(simPlan&&simPlan.runs.length>1)?' step '+(simPlan.i+1)+'/'+simPlan.runs.length:'';
+    simStatus('Simulating'+step+'… ('+fmtEng((now-t0)/1000,2,'s')+')');
   },200);
 }
 function stopSimTicker(){
@@ -342,14 +351,13 @@ function simWorkerHandleMessage(msg){
     return;
   }
   if(msg.type==='result'){
-    stopSimTicker();
-    clearTimeout(simWatchdog);
-    finishRun(msg.result,msg.elapsed,msg.errs,msg.info);
+    onEngineResult(msg.result,msg.elapsed,msg.errs,msg.info);
     return;
   }
   if(msg.type==='error'){
     stopSimTicker();
     clearTimeout(simWatchdog);
+    simPlan=null;
     simStatus('Simulation failed: '+msg.message);
     simLog(msg.stack||msg.message,true);
     endRunUI();
@@ -392,12 +400,12 @@ function mtRunOnMainThread(token,netlist){
       var errs=null,info=null;
       try{errs=sim.getError&&sim.getError();info=sim.getInfo&&sim.getInfo();}catch(e){}
       if(token!==simRunToken)return;
-      stopSimTicker();clearTimeout(simWatchdog);
-      finishRun(result,elapsed,errs||[],info||'');
+      onEngineResult(result,elapsed,errs||[],info||'');
     });
   }).catch(function(err){
     if(token!==simRunToken)return;
     stopSimTicker();clearTimeout(simWatchdog);
+    simPlan=null;
     simStatus('Simulation failed: '+(err&&err.message||err));
     simLog(String(err&&err.stack||err),true);
     endRunUI();
@@ -496,8 +504,10 @@ function onAnalysisTypeChange(sel){
 }
 
 // Assemble the full deck: generated devices + analysis card + user directives + .end.
-function buildFullNetlist(){
-  var core=generateNetlist();
+// `paramValues` ({name -> value string}) pins the swept parameters for one run
+// of a parameter sweep.
+function buildFullNetlist(paramValues){
+  var core=generateNetlist(paramValues?{paramValues:paramValues}:null);
   var dirEl=document.getElementById('sim-directives');
   var directives=dirEl?(dirEl.value||'').trim():'';
   var lines=[core];
@@ -566,6 +576,7 @@ function stopSimulation(){
   stopSimTicker();
   clearTimeout(simWatchdog);
   simRunToken++;
+  simPlan=null;
   if(simWorker){simWorker.terminate();simWorker=null;}
   simStatus('Simulation stopped.');
   simLog('Simulation stopped by user.');
@@ -581,7 +592,7 @@ function stopSimulation(){
 // to their defaults instead of inheriting the previous schematic's.
 function resetSimForSchematic(resetSetup){
   if(simRunPending)stopSimulation();
-  simLastResult=null;simLastInfoText='';
+  simLastResult=null;simLastInfoText='';simRuns=null;
   simSelection={};simSelectionAuto=false;
   simSeriesColor={};simColorAssign={};
   simYFit=null;simYFit2=null;
@@ -607,37 +618,103 @@ function resetSimForSchematic(resetSetup){
 // with a "Simulating…" placeholder, not stale data from a previous run — and
 // gets filled the instant the worker's result message arrives.
 function runSimulation(){
+  // The parameter sweep is planned first: an invalid setup is reported before
+  // anything is started.
+  var plan=buildStepPlan();
+  if(!plan.ok){
+    simStatus(plan.error);
+    simLog(plan.error,true);
+    return;
+  }
   setRunButtonState('running');
   var logEl=document.getElementById('sim-log');if(logEl)logEl.textContent='';
   if(!simViewActive)setSimView(true);
   showSimPlotPlaceholder('Simulating…');
   var token=++simRunToken;
-  var netlist=buildFullNetlist();
-  simRunPending={token:token,netlist:netlist};
+  simRunT0=(typeof performance!=='undefined'?performance.now():Date.now());
+  simPlan={names:plan.names,i:0,done:[],runs:plan.runs.map(function(r){
+    var pv={};
+    for(var k in r.assign)pv[k]=r.assign[k].str;
+    return {assign:r.assign,label:stepLabel(r.assign),netlist:buildFullNetlist(plan.names.length?pv:null)};
+  })};
+  simLog('--- Netlist sent to NGSpice'+(simPlan.runs.length>1?' (first of '+simPlan.runs.length+' runs)':'')+' ---');
+  simLog(simPlan.runs[0].netlist);
+  simLog('-------------------------------');
+  dispatchPlanRun(token);
+}
+
+// "Rl=1k, C=2n" — the tag of one run of a parameter sweep.
+function stepLabel(assign){
+  var parts=[];
+  for(var k in assign)parts.push(k+'='+fmtSpiceEng(assign[k].num,5));
+  return parts.join(', ');
+}
+
+// Send the plan's current run to the engine (worker, or main thread as fallback).
+function dispatchPlanRun(token){
+  var run=simPlan.runs[simPlan.i];
+  simRunPending={token:token,netlist:run.netlist};
   // A fatal ngspice error (e.g. an unknown function in a B-source) can abort
   // the engine without ever posting a reply, which would leave the UI stuck
   // on "Simulating…" forever. The watchdog reports that and — when the engine
   // is running in its worker — actually kills it (terminate()), instead of
   // just abandoning a main-thread call that has no equivalent "stop" button.
-  // A fresh worker/engine is created on the next run either way.
+  // A fresh worker/engine is created on the next run either way. It is re-armed
+  // for every run of a sweep: it limits one simulation, not the whole sweep.
+  clearTimeout(simWatchdog);
   simWatchdog=setTimeout(function(){
     stopSimTicker();
     simStatus('No response from NGSpice after 90 s — the engine probably hung (see the log / browser console). A fresh engine will be loaded on the next run.');
     simLog('watchdog: no result after 90 s, dropping the engine',true);
     if(simWorker){simWorker.terminate();simWorker=null;}
     mtSimInstance=null;mtSimStarting=null;
+    simPlan=null;
     endRunUI();
   },90000);
-  simLog('--- Netlist sent to NGSpice ---');
-  simLog(netlist);
-  simLog('-------------------------------');
   var w=getSimWorker();
-  if(w)w.postMessage({type:'run',token:token,netlist:netlist});
-  else mtRunOnMainThread(token,netlist);
+  if(w)w.postMessage({type:'run',token:token,netlist:run.netlist});
+  else mtRunOnMainThread(token,run.netlist);
 }
 
-// Result arrived from the worker: log, parse .measure results, plot.
-function finishRun(result,elapsed,errs,info){
+// One simulation of the plan has come back (worker or fallback). An ordinary run
+// goes straight to finishRun(); a sweep collects every run first.
+function onEngineResult(result,elapsed,errs,info){
+  var plan=simPlan;
+  if(!plan||plan.runs.length===1){
+    stopSimTicker();clearTimeout(simWatchdog);
+    simPlan=null;
+    finishRun(result,elapsed,errs,info);
+    return;
+  }
+  var run=plan.runs[plan.i];
+  if(errs&&errs.length)errs.forEach(function(e){simLog('['+run.label+'] '+e,true);});
+  if(!result||!result.data||!result.data.length){
+    stopSimTicker();clearTimeout(simWatchdog);
+    simPlan=null;
+    simStatus('No data returned for step '+(plan.i+1)+'/'+plan.runs.length+' ('+run.label+'). Check the log.');
+    simLog('--- step '+(plan.i+1)+' ('+run.label+') returned no data ---',true);
+    if(info)simLog(info);
+    showSimPlotPlaceholder('No data returned for step '+(plan.i+1)+' ('+run.label+'). Check the log below.');
+    endRunUI();
+    return;
+  }
+  plan.done.push({assign:run.assign,label:run.label,result:result,info:info||''});
+  simLog('step '+(plan.i+1)+'/'+plan.runs.length+': '+run.label+' — '+result.numPoints+' point(s)');
+  plan.i++;
+  if(plan.i<plan.runs.length){
+    dispatchPlanRun(simRunToken);
+    return;
+  }
+  stopSimTicker();clearTimeout(simWatchdog);
+  simPlan=null;
+  var total=(typeof performance!=='undefined'?performance.now():Date.now())-simRunT0;
+  finishRun(plan.done[0].result,total,[],plan.done[0].info,{names:plan.names,runs:plan.done});
+}
+
+// Result arrived (a sweep: the first run's result plus all runs in `runs`):
+// log, parse .measure results, plot.
+function finishRun(result,elapsed,errs,info,runs){
+  simRuns=runs||null;
   if(errs&&errs.length)errs.forEach(function(e){simLog(e,true);});
   if(info)simLog(info);
   simLastInfoText=info||'';
@@ -653,7 +730,7 @@ function finishRun(result,elapsed,errs,info){
   // Carry the signal selection over to the new run: keep what still exists,
   // drop what the netlist no longer produces.
   reconcileSelection(result);
-  simStatus('Done: '+result.numPoints+' point(s), '+result.numVariables+' variable(s), '+result.dataType+'.'+
+  simStatus('Done: '+(simRuns?simRuns.runs.length+' runs ('+simRuns.names.join(', ')+'), ':'')+result.numPoints+' point(s), '+result.numVariables+' variable(s), '+result.dataType+'.'+
     (elapsed!=null?' ('+fmtEng(elapsed/1000,3,'s')+')':''));
   plotResult(result);
   if(typeof paNotifyData==='function')paNotifyData();
@@ -681,15 +758,24 @@ function showSimPlotPlaceholder(msg){
 // out of the last run's info text — .measure has no dedicated result API in
 // eecircuit-engine, this is the same text the log panel already shows.
 function escapeRegExp(s){return String(s).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}
+function measureResultFromInfo(name,info){
+  var re=new RegExp('^\\s*'+escapeRegExp(name)+'\\s*=\\s*(\\S+)','im');
+  var match=String(info||'').match(re);
+  if(!match)return {ok:false,raw:'no result'};
+  var raw=match[1];
+  return {ok:raw.toLowerCase()!=='failed'&&isFinite(parseFloat(raw)),raw:raw,value:parseFloat(raw)};
+}
 function parseMeasurements(){
   for(var i=0;i<simMeasurements.length;i++){
     var m=simMeasurements[i];
+    delete m.results;
     if(m.enabled===false||!m.name){m.result=null;continue;}
-    var re=new RegExp('^\\s*'+escapeRegExp(m.name)+'\\s*=\\s*(\\S+)','im');
-    var match=simLastInfoText.match(re);
-    if(!match){m.result={ok:false,raw:'no result'};continue;}
-    var raw=match[1];
-    m.result={ok:raw.toLowerCase()!=='failed',raw:raw,value:parseFloat(raw)};
+    // m.result is the first run's (an ordinary run has only that one); a
+    // parameter sweep additionally gets one result per run in m.results.
+    m.result=measureResultFromInfo(m.name,simLastInfoText);
+    if(simRuns){
+      m.results=simRuns.runs.map(function(r){return measureResultFromInfo(m.name,r.info);});
+    }
   }
 }
 
@@ -1062,6 +1148,7 @@ function renderMeasureList(){
     var resHtml;
     if(kwDisabled)resHtml='<span class="sim-measure-result">needs tran/dc/ac</span>';
     else if(!m.result)resHtml='<span class="sim-measure-result">—</span>';
+    else if(m.results)resHtml='<span class="sim-measure-result ok" title="smallest … largest value over all runs of the parameter sweep">'+esc(measureRangeText(m))+'</span>';
     else if(m.result.ok)resHtml='<span class="sim-measure-result ok">'+esc(fmtEng(m.result.value,5))+'</span>';
     else resHtml='<span class="sim-measure-result failed">'+esc(m.result.raw||'failed')+'</span>';
     html+='<div class="sim-measure-row" data-siglabel="'+esc(m.name||'')+'">'+
@@ -1115,20 +1202,38 @@ function measureReportRows(){
     if(kwDisabled){row.result='needs tran/dc/ac';row.resultCls='none';}
     else if(!row.enabled){row.result='disabled';row.resultCls='none';}
     else if(!m.result){row.result='—';row.resultCls='none';}
+    else if(m.results){row.result=measureRangeText(m);row.resultCls='';}
     else if(m.result.ok){row.result=fmtEng(m.result.value,5);row.resultCls='';}
     else{row.result=m.result.raw||'failed';row.resultCls='failed';}
     return row;
   });
 }
 
+// "min … max" over the runs of a parameter sweep (failed runs left out).
+function measureRangeText(m){
+  var v=(m.results||[]).filter(function(r){return r.ok;}).map(function(r){return r.value;});
+  if(!v.length)return (m.results&&m.results[0]&&m.results[0].raw)||'failed';
+  var lo=Math.min.apply(null,v),hi=Math.max.apply(null,v);
+  var txt=(lo===hi)?fmtEng(lo,4):fmtEng(lo,4)+' … '+fmtEng(hi,4);
+  return v.length<m.results.length?txt+' ('+(m.results.length-v.length)+' failed)':txt;
+}
+
+// Selection of the "measurement vs parameter" plot in the report dialog; kept
+// across re-renders (and runs) as long as the names still exist.
+var simReportSel={meas:null,x:null,log:null,xAuto:null};
+var simReportPlot=null;
+
+function reportSweepActive(){return !!(simRuns&&simRuns.runs.length>1);}
+
 function renderMeasureReport(){
   var host=document.getElementById('measure-report-body');
   if(!host)return;
+  if(simReportPlot){simReportPlot.destroy();simReportPlot=null;}
   if(!simMeasurements.length){
     host.innerHTML='<div class="report-empty">No measurements yet — add one in the simulation settings.</div>';
     return;
   }
-  var html='<table class="report-table"><thead><tr><th>Name</th><th>Type</th><th>Signal(s)</th><th>Settings</th><th style="text-align:right">Result</th></tr></thead><tbody>';
+  var html='<table class="report-table"><thead><tr><th>Name</th><th>Type</th><th>Signal(s)</th><th>Settings</th><th style="text-align:right">'+(reportSweepActive()?'Result (min … max)':'Result')+'</th></tr></thead><tbody>';
   measureReportRows().forEach(function(r){
     html+='<tr class="'+(r.enabled?'':'report-off')+'">'+
       '<td class="report-name">'+esc(r.name)+'</td>'+
@@ -1137,7 +1242,148 @@ function renderMeasureReport(){
       '<td class="report-cond">'+(r.cond.length?r.cond.map(esc).join('<br>'):'—')+'</td>'+
       '<td class="report-result '+r.resultCls+'">'+esc(r.result)+'</td></tr>';
   });
-  host.innerHTML=html+'</tbody></table>';
+  html+='</tbody></table>';
+  if(reportSweepActive())html+=sweepReportHtml();
+  host.innerHTML=html;
+  if(reportSweepActive())initSweepReport(host);
+}
+
+// Measurements that produced at least one number in the last sweep.
+function sweepMeasurements(){
+  return simMeasurements.filter(function(m){
+    return m.enabled!==false&&m.name&&m.results&&m.results.some(function(r){return r.ok;});
+  });
+}
+
+function sweepReportHtml(){
+  var runs=simRuns.runs,names=simRuns.names,ms=sweepMeasurements();
+  var html='<div class="report-section">Parameter sweep — '+runs.length+' runs</div>';
+  html+='<table class="report-table"><thead><tr><th>#</th>'+names.map(function(n){return '<th>'+esc(n)+'</th>';}).join('')+
+    simMeasurements.filter(function(m){return m.enabled!==false&&m.name;}).map(function(m){return '<th style="text-align:right">'+esc(m.name)+'</th>';}).join('')+'</tr></thead><tbody>';
+  runs.forEach(function(r,ri){
+    html+='<tr><td>'+(ri+1)+'</td>'+names.map(function(n){return '<td class="report-sig">'+esc(fmtSpiceEng(r.assign[n].num,5))+'</td>';}).join('');
+    simMeasurements.forEach(function(m){
+      if(m.enabled===false||!m.name)return;
+      var res=m.results&&m.results[ri];
+      html+='<td class="report-result'+(res&&res.ok?'':' failed')+'">'+esc(res&&res.ok?fmtEng(res.value,5):(res?res.raw:'—'))+'</td>';
+    });
+    html+='</tr>';
+  });
+  html+='</tbody></table>';
+  html+='<div class="report-section">Plot — measurement over parameter</div>';
+  if(!ms.length){
+    html+='<div class="report-empty">No measurement returned a value in this sweep, nothing to plot.</div>';
+    return html;
+  }
+  html+='<div class="report-plot-ctl" id="measure-report-ctl">'+
+    ms.map(function(m){
+      return '<label class="sim-check"><input type="checkbox" data-rm="'+esc(m.name)+'"> <span class="report-plot-swatch" data-rmc="'+esc(m.name)+'"></span>'+esc(m.name)+'</label>';
+    }).join('');
+  if(names.length>1){
+    html+='<label class="report-plot-x">x axis <select class="sim-select" id="measure-report-x">'+
+      names.map(function(n){return '<option value="'+esc(n)+'">'+esc(n)+'</option>';}).join('')+'</select></label>';
+  }
+  html+='<label class="sim-check"><input type="checkbox" id="measure-report-log"> log x</label></div>'+
+    '<div id="measure-report-plot" class="report-plot"></div>';
+  return html;
+}
+
+function initSweepReport(host){
+  var ms=sweepMeasurements();
+  if(!ms.length)return;
+  var names=simRuns.names;
+  if(!simReportSel.meas)simReportSel.meas={};
+  // keep only measurements that still exist; default to the first one
+  var valid={};ms.forEach(function(m){valid[m.name]=true;});
+  for(var k in simReportSel.meas)if(!valid[k])delete simReportSel.meas[k];
+  if(!Object.keys(simReportSel.meas).length)simReportSel.meas[ms[0].name]=true;
+  if(!simReportSel.x||names.indexOf(simReportSel.x)<0)simReportSel.x=names[names.length-1];
+  if(simReportSel.log==null||simReportSel.xAuto!==simReportSel.x){
+    // logarithmic parameter steps are shown on a log axis by default
+    var pd=paramDefs().filter(function(p){return p.name===simReportSel.x;})[0];
+    simReportSel.log=!!(pd&&pd.step&&(pd.step.type==='dec'||pd.step.type==='oct'));
+    simReportSel.xAuto=simReportSel.x;
+  }
+  host.querySelectorAll('[data-rm]').forEach(function(cb){
+    cb.checked=!!simReportSel.meas[cb.getAttribute('data-rm')];
+    cb.addEventListener('change',function(){
+      if(cb.checked)simReportSel.meas[cb.getAttribute('data-rm')]=true;else delete simReportSel.meas[cb.getAttribute('data-rm')];
+      drawReportPlot();
+    });
+  });
+  var xs=document.getElementById('measure-report-x');
+  if(xs){
+    xs.value=simReportSel.x;
+    xs.addEventListener('change',function(){simReportSel.x=xs.value;simReportSel.log=null;initSweepReport(host);});
+  }
+  var lg=document.getElementById('measure-report-log');
+  if(lg){
+    lg.checked=!!simReportSel.log;
+    lg.addEventListener('change',function(){simReportSel.log=lg.checked;simReportSel.xAuto=simReportSel.x;drawReportPlot();});
+  }
+  drawReportPlot();
+}
+
+// Measurement values over the chosen parameter. Further swept parameters split
+// the plot into one dashed/solid curve family per combination.
+function drawReportPlot(){
+  var box=document.getElementById('measure-report-plot');
+  if(!box)return;
+  if(simReportPlot){simReportPlot.destroy();simReportPlot=null;}
+  box.innerHTML='';
+  var ms=sweepMeasurements().filter(function(m){return simReportSel.meas[m.name];});
+  document.querySelectorAll('[data-rmc]').forEach(function(sw){
+    var idx=ms.map(function(m){return m.name;}).indexOf(sw.getAttribute('data-rmc'));
+    sw.style.background=idx>=0?SIM_PALETTE[idx%SIM_PALETTE.length]:'transparent';
+  });
+  if(!ms.length){box.innerHTML='<div class="report-empty">Tick a measurement to plot it.</div>';return;}
+  if(typeof uPlot==='undefined'){box.textContent='Plot library (uPlot) not loaded — check your network connection.';return;}
+  var xName=simReportSel.x,others=simRuns.names.filter(function(n){return n!==xName;});
+  var runs=simRuns.runs;
+  // x grid: every distinct value of the chosen parameter
+  var xSet={};runs.forEach(function(r){xSet[r.assign[xName].str]=r.assign[xName].num;});
+  var xStrs=Object.keys(xSet).sort(function(a,b){return xSet[a]-xSet[b];});
+  var xVals=xStrs.map(function(k){return xSet[k];});
+  // groups: one per combination of the other swept parameters
+  var groups=[],gIdx={};
+  runs.forEach(function(r){
+    var key=others.map(function(n){return r.assign[n].str;}).join('|');
+    if(gIdx[key]==null){gIdx[key]=groups.length;groups.push({key:key,label:others.map(function(n){return n+'='+fmtSpiceEng(r.assign[n].num,5);}).join(', ')});}
+  });
+  var cell={};
+  runs.forEach(function(r,ri){
+    var key=others.map(function(n){return r.assign[n].str;}).join('|');
+    cell[key+'#'+r.assign[xName].str]=ri;
+  });
+  var series=[{label:xName,value:function(u,v){return fmtEng(v,5);}}],data=[xVals];
+  var oneGroup=groups.length===1;
+  ms.forEach(function(m,mi){
+    groups.forEach(function(g,gi){
+      var d=xStrs.map(function(xs){
+        var ri=cell[g.key+'#'+xs];
+        var res=ri!=null&&m.results[ri];
+        return (res&&res.ok)?res.value:null;
+      });
+      series.push({label:m.name+(oneGroup?'':' · '+g.label),stroke:SIM_PALETTE[mi%SIM_PALETTE.length],width:2,
+        dash:STEP_DASHES[gi%STEP_DASHES.length],spanGaps:true,points:{show:true,size:6},
+        value:function(u,v){return fmtEng(v,6);}});
+      data.push(d);
+    });
+  });
+  var logX=!!simReportSel.log&&xVals.every(function(v){return v>0;});
+  simReportPlot=new uPlot({
+    width:Math.max(300,box.clientWidth||700),height:300,padding:[10,18,4,4],
+    series:series,
+    scales:{x:{time:false,distr:logX?3:1},y:{range:function(u,a,b){return simAutoRange(a,b);}}},
+    cursor:{drag:{x:true,y:false}},
+    legend:{live:true},
+    axes:[
+      {stroke:SIM_AXIS_TEXT,font:SIM_AXIS_FONT,grid:{stroke:SIM_AXIS_GRID},ticks:{stroke:SIM_AXIS_GRID},
+       values:function(u,ticks){return ticks.map(function(t){return t==null?'':fmtEng(t,4);});}},
+      {scale:'y',stroke:SIM_AXIS_TEXT,font:SIM_AXIS_FONT,grid:{stroke:SIM_AXIS_GRID},ticks:{stroke:SIM_AXIS_GRID},
+       size:simYAxisSize,values:function(u,ticks){return axisValuesSI(u,ticks,'y','');}}
+    ]
+  },data,box);
 }
 
 function measureReportOpen(){
@@ -1147,8 +1393,8 @@ function measureReportOpen(){
 function showMeasureReport(){
   var modal=document.getElementById('measure-report-modal');
   if(!modal)return;
-  renderMeasureReport();
   modal.style.display='flex';
+  renderMeasureReport();   // after display: the sweep plot sizes itself to the visible box
   modal.onclick=function(e){if(e.target===modal)closeMeasureReport();};
 }
 function closeMeasureReport(){
@@ -1160,6 +1406,15 @@ function copyMeasureReport(){
   measureReportRows().forEach(function(r){
     lines.push([r.name,r.type,r.signals,r.cond.join('; '),r.result].join('\t'));
   });
+  if(reportSweepActive()){
+    var ms2=simMeasurements.filter(function(m){return m.enabled!==false&&m.name;});
+    lines.push('');
+    lines.push(['#'].concat(simRuns.names,ms2.map(function(m){return m.name;})).join('\t'));
+    simRuns.runs.forEach(function(r,ri){
+      lines.push([ri+1].concat(simRuns.names.map(function(n){return paramNumStr(r.assign[n].num);}),
+        ms2.map(function(m){var res=m.results&&m.results[ri];return res&&res.ok?String(res.value):(res?res.raw:'');})).join('\t'));
+    });
+  }
   var text=lines.join('\n');
   if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(text).then(function(){hint('Measurement table copied');},function(){hint('Copy failed');});
   else hint('Clipboard not available');
@@ -1708,6 +1963,55 @@ function simAutoRange(dMin,dMax){
   return uPlot.rangeNum(Math.min(dMin,0),Math.max(dMax,0),0.1,true);
 }
 
+// ═══ FAMILIES OF CURVES (parameter sweep) ═══
+var STEP_DASHES=[undefined,[8,4],[2,3],[8,3,2,3],[14,4],[3,3,10,3]];
+// Colour of run i of n: the plot palette for a handful of runs, an evenly
+// spread hue ramp beyond that.
+function stepColor(i,n){
+  if(n<=SIM_PALETTE.length)return SIM_PALETTE[i%SIM_PALETTE.length];
+  return 'hsl('+Math.round((200+i*360/n)%360)+',80%,62%)';
+}
+
+// For the signals of `ser` (built from the first run) collect the same signal
+// of every run. Runs of a transient analysis have different time grids (ngspice
+// steps adaptively), so all runs are laid on the union of their x values;
+// where a run has no sample the value is null and uPlot draws across the gap.
+function buildFamilySeries(ser){
+  var runs=simRuns.runs;
+  var perRun=runs.map(function(r){return buildSeriesFromResult(r.result);});
+  var xs=runs.map(function(r){return r.result.data[0].values.map(_re);});
+  var same=xs.every(function(a){
+    if(a.length!==xs[0].length)return false;
+    for(var i=0;i<a.length;i++)if(a[i]!==xs[0][i])return false;
+    return true;
+  });
+  var xAll,index=null;
+  if(same)xAll=xs[0];
+  else{
+    var set={};
+    xs.forEach(function(a){a.forEach(function(v){set[v]=true;});});
+    xAll=Object.keys(set).map(Number).sort(function(a,b){return a-b;});
+    index={};
+    for(var u=0;u<xAll.length;u++)index[xAll[u]]=u;
+  }
+  var items=[];
+  for(var s=0;s<ser.names.length;s++){
+    for(var r=0;r<runs.length;r++){
+      var at=perRun[r].names.indexOf(ser.names[s]);
+      var src=at>=0?perRun[r].datas[at]:null;
+      var data;
+      if(!src)data=new Array(xAll.length).fill(null);
+      else if(same)data=src;
+      else{
+        data=new Array(xAll.length).fill(null);
+        for(var i=0;i<src.length;i++)data[index[xs[r][i]]]=src[i];
+      }
+      items.push({sig:ser.names[s],run:r,label:ser.names[s]+' · '+runs[r].label,data:data});
+    }
+  }
+  return {xVals:xAll,items:items};
+}
+
 function plotResult(result){
   var container=document.getElementById('sim-plot');
   if(!container)return;
@@ -1721,11 +2025,19 @@ function plotResult(result){
   var isFreq=(xVar.type==='frequency');
   if(!xVar.values||xVar.values.length<2){
     // .op or single point: show a value table instead of a degenerate plot.
-    var html='<table class="sim-table"><tr><th>Variable</th><th>Value</th></tr>';
+    // A parameter sweep gets one value column per run.
+    var tRuns=(simRuns&&simRuns.runs.length>1)?simRuns.runs:null;
+    var html='<table class="sim-table"><tr><th>Variable</th>'+
+      (tRuns?tRuns.map(function(r){return '<th>'+esc(r.label)+'</th>';}).join(''):'<th>Value</th>')+'</tr>';
     for(var t=0;t<result.data.length;t++){
       var dv=result.data[t];
-      var val=dv.values&&dv.values.length?dv.values[0]:'';
-      html+='<tr><td>'+dv.name+'</td><td>'+fmtEng(isComplex?_mag(val):_re(val),6)+'</td></tr>';
+      html+='<tr><td>'+dv.name+'</td>';
+      (tRuns||[{result:result}]).forEach(function(r){
+        var rd=r.result.data[t];
+        var val=rd&&rd.values&&rd.values.length?rd.values[0]:'';
+        html+='<td>'+fmtEng(r.result.dataType==='complex'?_mag(val):_re(val),6)+'</td>';
+      });
+      html+='</tr>';
     }
     html+='</table>';
     container.innerHTML=html;
@@ -1734,6 +2046,9 @@ function plotResult(result){
   }
   var xVals=xVar.values.map(_re);
   var ser=buildSeriesFromResult(result);
+  // Parameter sweep: one curve per signal and run, on a common x grid.
+  var fam=(simRuns&&simRuns.runs.length>1&&ser.names.length)?buildFamilySeries(ser):null;
+  if(fam){xVals=fam.xVals;}
   if(!ser.names.length){
     // Nothing selected — say so instead of drawing an empty coordinate system.
     container.innerHTML='<div class="sim-plot-empty">No signals selected.<br>'+
@@ -1753,7 +2068,22 @@ function plotResult(result){
   // Current series get their own y axis (y2, right-hand side) so a plot mixing
   // V(...) and I(...) doesn't squash both onto one shared scale.
   var hasCurrent=false;
-  for(var k=0;k<ser.names.length;k++){
+  if(fam){
+    // One signal: every run gets its own colour. Several signals: colour = signal
+    // (so the sidebar chips still match), dash pattern = run.
+    var nRuns=simRuns.runs.length,oneSig=ser.names.length===1;
+    for(var fi=0;fi<fam.items.length;fi++){
+      var it=fam.items[fi];
+      var fcol=oneSig?stepColor(it.run,nRuns):simColorAssign[String(it.sig).toLowerCase()];
+      simSeriesColor[String(it.label).toLowerCase()]=fcol;
+      if(!simSeriesColor[String(it.sig).toLowerCase()])simSeriesColor[String(it.sig).toLowerCase()]=fcol;
+      var fCur=/^i\(/i.test(it.sig)||/^@/.test(it.sig);
+      if(fCur)hasCurrent=true;
+      series.push({label:it.label+(isComplex?' |mag|':''),stroke:fcol,width:2,scale:fCur?'y2':'y',spanGaps:true,
+        dash:oneSig?undefined:STEP_DASHES[it.run%STEP_DASHES.length],
+        value:function(u,v){return fmtEng(v,6);}});
+    }
+  }else for(var k=0;k<ser.names.length;k++){
     var col=simColorAssign[serKeys[k]];
     simSeriesColor[serKeys[k]]=col;
     var isCur=/^i\(/i.test(ser.names[k])||/^@/.test(ser.names[k]);
@@ -1802,7 +2132,7 @@ function plotResult(result){
       size:simYAxisSize,
       values:function(u,ticks){return axisValuesSI(u,ticks,'y2','A');}});
   }
-  var data=[xVals].concat(ser.datas);
+  var data=[xVals].concat(fam?fam.items.map(function(it){return it.data;}):ser.datas);
   container.innerHTML='';
   if(simPlot){simPlot.destroy();simPlot=null;}
   simYFit=null;simYFit2=null;

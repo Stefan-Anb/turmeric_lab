@@ -30,7 +30,7 @@ npm-Dependencies** — alles läuft über klassische `<script>`-Tags direkt aus
 globalen Scope teilen):
 
 ```
-js/components.js → js/schematic.js → js/netlist.js → js/app.js → js/simulation.js
+js/components.js → js/schematic.js → js/netlist.js → js/app.js → js/params.js → js/simulation.js
   → js/power-analyzer-core.js → js/power-analyzer-ui.js → js/power-analyzer-sim.js
 ```
 
@@ -40,7 +40,8 @@ js/components.js → js/schematic.js → js/netlist.js → js/app.js → js/simu
 | `js/components.js` | Bauteilbibliothek `CD`, SVG-Zeichenhelfer, Mini-Markdown-Renderer |
 | `js/netlist.js` | SPICE-Netzlistengenerierung |
 | `js/app.js` | Rendering, Events, Tools, Undo, Copy/Paste, Import/Export, Persistenz |
-| `js/simulation.js` | NGSpice-WASM-Anbindung, Plot (uPlot) |
+| `js/params.js` | Parameter-Dialog (PARAMS) und ƒ-Button zum Einfügen von `{name}`; Datenmodell/Step-Logik liegen in `js/netlist.js` |
+| `js/simulation.js` | NGSpice-WASM-Anbindung, Plot (uPlot), Parameter-Sweeps (Run-Plan, Kurvenscharen, Measurement-Report-Plot) |
 | `js/power-analyzer-core.js` | Leistungsanalysator: Messkern, portabel (kein DOM, keine App-Globals) |
 | `js/power-analyzer-ui.js` | Leistungsanalysator: Dialog, portabel (nur Core + Datenquellen-Interface) |
 | `js/power-analyzer-sim.js` | Leistungsanalysator: Anbindung an Simulation/Probes (TurmericLab-Glue) |

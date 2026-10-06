@@ -5,7 +5,8 @@
   nutzen. Der Schalter gehört aus dieser Liste entfernt.
 
 
-* Step Parameter, Multisimulation, Graphenschar im Plot, Auswahl einzelner Graphen, Berechnung von Kennlinien aus Multisimulation
+* Step Parameter, Multisimulation, Graphenschar im Plot, Auswahl einzelner Graphen, Berechnung von Kennlinien per Measurement aus Multisimulation
+
 * alle Platzhalter entfernen oder setzen -> kann verwirren (schon erledigt?!)
 
 Einbinden der Echtzeit-Simulation (mit Javscript-Code)

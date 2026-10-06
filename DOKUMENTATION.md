@@ -1233,6 +1233,63 @@ ADC-Stufe, `attach()`).
   CSS-Kappung (`max-height:44px`) macht die Plotgroesse unabhaengig vom
   Layout-Zeitpunkt.
 
+## 11. Parameter und Parameter-Sweeps
+
+**Datenmodell.** `S.params` (Schaltplanebene, in `collectState()`/`applyState()`
+mitgespeichert, nicht im Undo-Stack) ist eine Liste
+`{id, name, value, step:{on, type:'lin'|'dec'|'oct'|'list', start, stop, inc, pts, list}}`.
+Bearbeitet wird sie im modalen Dialog hinter dem **PARAMS**-Button der
+Headerbar (`js/params.js`). Jeder Eintrag erzeugt eine Zeile `.param name=value`
+in `generateNetlist()`; in Wertefeldern verwendet man `{name}`. Die schon
+vorhandene `param`-Komponente funktioniert weiter. Gibt es denselben Namen im
+Dialog, gewinnt der Dialog (kein doppeltes `.param`).
+
+**ƒ-Button.** `renderProps()` haengt neben jedes freie Textfeld (ausser
+`PARAM_BTN_SKIP_KEYS`) einen Button, der ein Menue mit allen Parametern oeffnet
+und `{name}` einfuegt (Auswahl ersetzt, Caret in Ausdruck fuegt ein, einfacher
+Zahlenwert wird ersetzt). Das Feld bekommt ein normales `input`-Event, es gibt
+keinen eigenen Speicherpfad.
+
+**Sweep ohne `.step`.** eecircuit-engine liefert aus einer Raw-Datei mit
+mehreren Plots nur den ersten. Deshalb laeuft der Sweep in der App:
+`buildStepPlan()` (netlist.js) bildet das kartesische Produkt aller Parameter
+mit `step.on` (erster Parameter im Dialog = aeusserste Schleife, Limit
+`PARAM_MAX_RUNS`), `runSimulation()` (simulation.js) baut pro Lauf eine eigene
+Netzliste (`buildFullNetlist(paramValues)` ueberschreibt die `.param`-Zeilen)
+und schickt sie nacheinander an dieselbe Engine (`dispatchPlanRun()`,
+`onEngineResult()`). Das funktioniert fuer .tran, .ac, .dc und .op gleich, und
+`.measure`-Ergebnisse stehen im Info-Text jedes einzelnen Laufs (der Text ist
+pro Lauf frisch). Der Watchdog (90 s) gilt je Lauf.
+
+**Ergebnisse.** `simRuns = {names, runs:[{assign, label, result, info}]}`,
+`simLastResult` bleibt der erste Lauf, damit alles, was "ein Ergebnis"
+erwartet (Signalliste, Power Analyzer, Cursor-Helfer), unveraendert arbeitet.
+`m.results[]` haelt je Messung ein Ergebnis pro Lauf, `m.result` das des ersten.
+
+**Kurvenschar.** `plotResult()` ruft `buildFamilySeries()`: pro Signal und Lauf
+eine Kurve. Transientlaeufe haben unterschiedliche (adaptive) Zeitraster, daher
+liegen alle Laeufe auf der Vereinigung der x-Werte, fehlende Samples sind
+`null` und `spanGaps:true` verbindet. Ein Signal: Farbe = Lauf. Mehrere
+Signale: Farbe = Signal, Strichart = Lauf (`STEP_DASHES`).
+
+**Measurement-Report.** Bei einem Sweep zeigt der Dialog zusaetzlich eine
+Tabelle Lauf x Messung und einen Plot Messwert ueber Parameter
+(`drawReportPlot()`); bei mehreren gesweepten Parametern waehlt man den
+x-Parameter, die uebrigen bilden Kurvengruppen. Dezimal-/Oktav-Sweeps starten
+mit logarithmischer x-Achse.
+
+**Fallstricke.**
+- `{name}` darf nicht in einem weiteren `{...}` stehen (ngspice). Wo ein
+  Nutzerwert in einen Ausdruck gespleisst wird (Rampen-PWL, Transformator-L),
+  entfernt `stripBraces()` die Klammern.
+- Der Load-Mode (B-Quelle) nimmt `{name}` im Wert, getestet mit `.dc`.
+- Eine unabhaengige I-Quelle kennt in `.save` nur `@iref[current]`, nicht
+  `[i]`; `[i]` laesst den WASM-Build haengen (siehe `buildSaveVectors()`).
+
+**Beispiele.** `library/param_load_sweep.svg` (DC-Sweep, Load-Mode-Quelle,
+Strom als Parameter) und `library/param_rc_sweep.svg` (RC, R dezadisch
+gesweept, Anstiegszeit ueber R im Report-Plot).
+
 ## Quellen (NGSpice / WASM)
 
 - Ngspice User's Manual v46 (HTML): <https://ngspice.sourceforge.io/docs/ngspice-html-manual/manual.xhtml>
