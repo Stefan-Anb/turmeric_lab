@@ -1699,6 +1699,15 @@ function simYAxisSize(u,values,axisIdx){
   return Math.ceil(Math.max(w,30)+tick+14);
 }
 
+// Automatic y range: always includes 0, so unipolar signals sit on the bottom
+// (or top) edge instead of floating in a window that only spans their data, and
+// bipolar signals have the zero line inside the plot. "Fit Y" (simFitY) is the
+// explicit way to zoom onto just the data.
+function simAutoRange(dMin,dMax){
+  if(dMin==null||dMax==null)return uPlot.rangeNum(dMin,dMax,0.1,true);
+  return uPlot.rangeNum(Math.min(dMin,0),Math.max(dMax,0),0.1,true);
+}
+
 function plotResult(result){
   var container=document.getElementById('sim-plot');
   if(!container)return;
@@ -1766,11 +1775,11 @@ function plotResult(result){
       // hook (simYFit), which auto-ranging itself honours.
       y:{range:function(u,dMin,dMax){
         if(simYFit)return [simYFit[0],simYFit[1]];
-        return uPlot.rangeNum(dMin,dMax,0.1,true);
+        return simAutoRange(dMin,dMax);
       }},
       y2:{range:function(u,dMin,dMax){
         if(simYFit2)return [simYFit2[0],simYFit2[1]];
-        return uPlot.rangeNum(dMin,dMax,0.1,true);
+        return simAutoRange(dMin,dMax);
       }}
     },
     cursor:{drag:{x:true,y:true,uni:8}},
