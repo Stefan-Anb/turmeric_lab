@@ -2,8 +2,8 @@
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 :root{
   --bg-deep:#0a0c0e;--bg-panel:#0f1215;--bg-card:#161b20;--bg-hover:#1e252d;
-  --border:#242d36;--border-hi:#2e3d4a;--accent:#00c8ff;--accent-dim:#005f80;
-  --accent2:#ff6b35;--text-hi:#e8edf2;--text-mid:#7a92a8;--text-lo:#3d5060;
+  --border:#2c3844;--border-hi:#3d5063;--accent:#00c8ff;--accent-dim:#005f80;
+  --accent2:#ff6b35;--text-hi:#e8edf2;--text-mid:#a9bccd;--text-lo:#7f95a8;
   --wire:#00c8ff;--wire-sel:#ff6b35;--comp-stroke:#a8c4d8;--comp-fill:#0f1215;
   --node-color:#ffcc00;
 }
@@ -274,7 +274,7 @@ body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);displ
 #sim-directive-preview.sim-preview-empty{color:var(--text-lo);border-style:dashed;}
 .sim-chip.sim-chip-i{background:#ffd04014;border-color:#8a6a00;color:var(--node-color);}
 .sim-chip.sim-chip-i button{color:var(--node-color);}
-.sim-chip.sim-chip-raw{background:#7a92a814;border-color:var(--border-hi);color:var(--text-mid);}
+.sim-chip.sim-chip-raw{background:#a9bccd14;border-color:var(--border-hi);color:var(--text-mid);}
 .sim-chip.sim-chip-raw button{color:var(--text-mid);}
 .sim-raw-item.probed{color:var(--accent);}
 .sim-swatch{width:8px;height:8px;border-radius:2px;flex:none;background:transparent;}

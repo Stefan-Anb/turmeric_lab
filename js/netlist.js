@@ -202,7 +202,8 @@ function buildSpiceRefMap(){
       var sref=c.label||'SRC'+counts.source;
       var meas=c.meas||'V';
       var mode=c.mode||'DC';
-      var pre=(mode==='BEHAV')?(meas==='I'?'G':'E'):(meas==='I'?'I':'V');
+      var isLoad=(mode==='DC'&&meas==='I'&&!!c.load);
+      var pre=isLoad?'B':((mode==='BEHAV')?(meas==='I'?'G':'E'):(meas==='I'?'I':'V'));
       map[c.id]=pre+sref;continue;
     }
     if(t==='sw'){map[c.id]='S'+(c.label||'');continue;}
@@ -613,7 +614,7 @@ function buildSaveVectors(){
     if(t==='nmos'||t==='pmos'){out.push('@'+ref+'[id]','@'+ref+'[ig]','@'+ref+'[is]');continue;}
     if(t==='source'||t==='vcc'){
       var first=ref.charAt(0).toUpperCase();
-      out.push((first==='I'||first==='G')?('@'+ref+'[i]'):('i('+ref+')'));
+      out.push((first==='I'||first==='G'||first==='B')?('@'+ref+'[i]'):('i('+ref+')'));
       continue;
     }
     // scr / pwmgen / custom subcircuits: their internal sources are covered by `all`
@@ -724,9 +725,23 @@ function generateNetlist(){
         acSpec='AC '+c.ac_mag+(acPhase&&acPhase!=='0'?' '+acPhase:'');
       }
       var line='';
-      if(mode==='DC'){
+      if(mode==='DC'&&dev.charAt(0)==='B'){
+        // Load mode: behavioural current source that only conducts while the +
+        // node is above the - node (soft 50 mV knee for the solver's sake), so
+        // it can't pull the node negative. Current flows + -> - like an I source.
+        var lval=c.value||def.val||'1';
+        line=dev+' '+net1+' '+net2+" I = '("+lval+")*min(max(v("+net1+","+net2+")/0.05,0),1)'";
+      }else if(mode==='DC'){
         var val=c.value||def.val||'1';
         line=dev+' '+net1+' '+net2+' DC '+val+(acSpec?' '+acSpec:'');
+      }else if(mode==='RAMP'){
+        var r0=c.ramp_start||'0';
+        var r1=c.ramp_end||'1';
+        var rtd=c.ramp_tdelay||'0';
+        var rdur=c.ramp_duration||'1m';
+        // PWL times must strictly increase, so skip the hold point without a delay.
+        var hasDelay=String(rtd).trim()!==''&&!/^[+-]?0*\.?0*(e[+-]?\d+)?$/i.test(String(rtd).trim());
+        line=dev+' '+net1+' '+net2+(acSpec?' '+acSpec:'')+' PWL(0 '+r0+(hasDelay?' '+rtd+' '+r0:'')+' {('+rtd+')+('+rdur+')} '+r1+')';
       }else if(mode==='AC'){
         var vo=c.ac_offset||'0';
         var va=c.ac_amplitude||'1';

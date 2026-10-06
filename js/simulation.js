@@ -1525,6 +1525,28 @@ function assignSimColors(keys){
   }
 }
 
+// Axis styling shared by all axes. The font is set explicitly so uPlot measures
+// the tick labels with the same face it draws them in.
+var SIM_AXIS_TEXT='#b4c6d6',SIM_AXIS_GRID='#26343f';
+var SIM_AXIS_FONT="11px 'Share Tech Mono', monospace";
+// Width of a y axis: widest tick label plus tick length and gap. uPlot's own
+// auto-size is computed from the values of the *previous* draw, so a label that
+// grows when the prefix changes (1000 µA) would be cut off until the next one.
+function simYAxisSize(u,values,axisIdx){
+  var ax=u.axes[axisIdx];
+  var ctx=u.ctx;
+  ctx.save();
+  ctx.font=SIM_AXIS_FONT;
+  var w=0;
+  for(var i=0;values&&i<values.length;i++){
+    if(values[i]==null)continue;
+    w=Math.max(w,ctx.measureText(String(values[i])).width);
+  }
+  ctx.restore();
+  var tick=(ax.ticks&&ax.ticks.size?ax.ticks.size:10);
+  return Math.ceil(Math.max(w,30)+tick+14);
+}
+
 function plotResult(result){
   var container=document.getElementById('sim-plot');
   if(!container)return;
@@ -1581,6 +1603,9 @@ function plotResult(result){
   var opts={
     width:Math.max(120,container.clientWidth||600),
     height:Math.max(60,container.clientHeight||320),
+    // Room for the half-width of the outermost tick labels (last x tick,
+    // top/bottom y tick) — otherwise they get clipped at the canvas edge.
+    padding:[10,18,4,4],
     series:series,
     scales:{
       x:{time:false,distr:isFreq?3:1},
@@ -1600,18 +1625,20 @@ function plotResult(result){
     legend:{live:true},
     plugins:[simTooltipPlugin(),simCursorPlugin()],
     axes:[
-      {stroke:'#7a92a8',grid:{stroke:'#1c2730'},ticks:{stroke:'#1c2730'},
+      {stroke:SIM_AXIS_TEXT,font:SIM_AXIS_FONT,grid:{stroke:SIM_AXIS_GRID},ticks:{stroke:SIM_AXIS_GRID},
        // A log frequency axis spans decades, so there each tick carries its own
        // prefix (1 Hz / 1 kHz / 1 MHz); a linear time axis gets a common one.
        values:isFreq
          ?function(u,ticks){return ticks.map(function(t){return fmtEng(t,4,xUnit);});}
          :function(u,ticks){return axisValuesSI(u,ticks,'x',xUnit);}},
-      {scale:'y',stroke:'#7a92a8',grid:{stroke:'#1c2730'},ticks:{stroke:'#1c2730'},
+      {scale:'y',stroke:SIM_AXIS_TEXT,font:SIM_AXIS_FONT,grid:{stroke:SIM_AXIS_GRID},ticks:{stroke:SIM_AXIS_GRID},
+       size:simYAxisSize,
        values:function(u,ticks){return axisValuesSI(u,ticks,'y',hasCurrent?'V':'');}}
     ]
   };
   if(hasCurrent){
-    opts.axes.push({scale:'y2',side:1,stroke:'#7a92a8',grid:{show:false},ticks:{stroke:'#1c2730'},
+    opts.axes.push({scale:'y2',side:1,stroke:SIM_AXIS_TEXT,font:SIM_AXIS_FONT,grid:{show:false},ticks:{stroke:SIM_AXIS_GRID},
+      size:simYAxisSize,
       values:function(u,ticks){return axisValuesSI(u,ticks,'y2','A');}});
   }
   var data=[xVals].concat(ser.datas);
@@ -1619,6 +1646,7 @@ function plotResult(result){
   if(simPlot){simPlot.destroy();simPlot=null;}
   simYFit=null;simYFit2=null;
   simPlot=new uPlot(opts,data,container);
+  resizeSimPlot();   // the legend sits below the canvas — shrink the canvas to fit
   // Double-click is uPlot's "reset zoom" — drop the manual vertical fit and the
   // measurement cursors too.
   container.addEventListener('dblclick',function(){
@@ -1697,7 +1725,7 @@ function fmtEng(v,digits,unit){
 // The prefix follows the visible *span*, not the absolute values, so zooming
 // into a 20 µs slice of a 5 ms run switches the axis to µs. It only steps back
 // up when the window sits so far from zero that the labels would run past four
-// integer digits. Everything is derived from the scale (not from the ticks), so
+// integer digits (three, so 1200 µA becomes 1.2 mA). Everything is derived from the scale (not from the ticks), so
 // it stays in sync no matter in which order uPlot draws things.
 function axisValuesSI(u,ticks,scaleKey,unit){
   var sc=u.scales[scaleKey]||{};
@@ -1706,7 +1734,7 @@ function axisValuesSI(u,ticks,scaleKey,unit){
   var maxAbs=Math.max(Math.abs(lo),Math.abs(hi));
   var span=Math.abs(hi-lo)||maxAbs;
   var idx=siIndexFor(span);
-  while(idx>0&&maxAbs/SI_PREFIX[idx][0]>=10000)idx--;
+  while(idx>0&&maxAbs/SI_PREFIX[idx][0]>=1000)idx--;
   var si={mult:SI_PREFIX[idx][0],prefix:SI_PREFIX[idx][1]};
   var suf=si.prefix+(unit||'');
   var scaled=ticks.map(function(t){return t/si.mult;});
@@ -2373,7 +2401,10 @@ function applySimConfigCollapse(){
 function resizeSimPlot(){
   var c=document.getElementById('sim-plot');
   if(!simPlot||!c)return;
-  var w=Math.max(120,c.clientWidth),h=Math.max(60,c.clientHeight);
+  // The legend is part of uPlot's DOM but not of its canvas height, so take it
+  // off the container height or the x axis is pushed out of view.
+  var lg=c.querySelector('.u-legend');
+  var w=Math.max(120,c.clientWidth),h=Math.max(60,c.clientHeight-(lg?lg.offsetHeight:0)-2);
   if(simPlot.width===w&&simPlot.height===h)return;
   simPlot.setSize({width:w,height:h});
 }

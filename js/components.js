@@ -763,7 +763,7 @@ const CD={
   source:{
     lbl:'SRC',val:'5V',hitW:100,hitH:60,
     props:{
-      mode:{l:'Mode',type:'enum',options:[{v:'DC',l:'DC'},{v:'AC',l:'AC'},{v:'PULSE',l:'Pulse'},{v:'BEHAV',l:'Behavioural'}]},
+      mode:{l:'Mode',type:'enum',options:[{v:'DC',l:'DC'},{v:'AC',l:'AC'},{v:'PULSE',l:'Pulse'},{v:'RAMP',l:'Ramp'},{v:'BEHAV',l:'Behavioural'}]},
       meas:{l:'Show',type:'enum',options:[{v:'V',l:'Voltage'},{v:'I',l:'Current'}]},
       label:{l:'Reference'},
       // Small-signal AC excitation for a .ac analysis. Independent of Mode above
@@ -771,8 +771,13 @@ const CD={
       // once, e.g. "V1 n1 n2 DC 0 AC 1 SIN(...)".
       ac_mag:{l:'.ac magnitude (opt.)'},
       ac_phase:{l:'.ac phase (deg, opt.)'},
-      // DC
+      // DC. Labels written with a "(V)" unit are switched to "(A)" in the
+      // properties panel when Show = Current (see srcUnitLabel() in app.js).
       value:{l:'Voltage (V)',modes:['DC']},
+      // Current source only: "Load" mode like LTspice's — the source sinks its
+      // current only while the + node is above the - node, so it never drags
+      // the node below its own - terminal.
+      load:{l:'Load mode (no negative voltage)',type:'bool',modes:['DC'],meas:['I']},
       // AC params
       ac_offset:{l:'Offset (V)',modes:['AC']},
       ac_amplitude:{l:'Amplitude (V)',modes:['AC']},
@@ -791,7 +796,13 @@ const CD={
       pulse_tperiod:{l:'Tperiod (s)',modes:['PULSE']},
       pulse_ncycles:{l:'Ncycles',modes:['PULSE']},
       // Behavioural
-      beh_eq:{l:'Equation',modes:['BEHAV']}
+      beh_eq:{l:'Equation',modes:['BEHAV']},
+      // Ramp: hold start value until TDelay, then linear to the end value over
+      // Duration, then hold (netlist: PWL).
+      ramp_start:{l:'Start (V)',modes:['RAMP']},
+      ramp_end:{l:'End (V)',modes:['RAMP']},
+      ramp_tdelay:{l:'TDelay (s)',modes:['RAMP']},
+      ramp_duration:{l:'Duration (s)',modes:['RAMP']}
     },
     pins:[{x:0,y:-40,n:'+'},{x:0,y:40,n:'-'}],
     draw(g,v){
@@ -804,7 +815,7 @@ const CD={
       // anymore — that was redundant with this): DC:'⎓' AC:'⏦' Pulse:'⎍'
       // Behavioural:'B'. Both this and the V/I line below it are sized to
       // fit inside the r=20 circle.
-      var symChar=mode==='AC'?'⏦':(mode==='PULSE'?'⎍':(mode==='BEHAV'?'B':'⎓'));
+      var symChar=mode==='AC'?'⏦':(mode==='PULSE'?'⎍':(mode==='RAMP'?'⟋':(mode==='BEHAV'?'B':'⎓')));
       var t1=TA(g,0,-9,symChar,'comp-label');t1.style.fontSize='12px';
       var t2=TA(g,0,11,meas,'comp-value');t2.style.fontSize='12px';
       // Small "+" outside the circle, close beside the + pin (pins[0], local

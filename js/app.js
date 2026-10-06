@@ -443,8 +443,11 @@ function renderProps(){
   }
   html+='<div class="props-sect">General</div>';
   const curMode = comp.mode || 'DC';
-  for(const[key,pd]of Object.entries(def.props||{})){
-    if(pd && pd.modes && !pd.modes.includes(curMode)) continue;
+  for(const[key,pd0]of Object.entries(def.props||{})){
+    if(pd0 && pd0.modes && !pd0.modes.includes(curMode)) continue;
+    if(pd0 && pd0.meas && !pd0.meas.includes(comp.meas||'V')) continue;
+    // Sources: "(V)" in a label becomes "(A)" for a current source.
+    const pd=(comp.type==='source'&&comp.meas==='I'&&pd0.l)?Object.assign({},pd0,{l:pd0.l.replace(/\(V\)/g,'(A)').replace(/^Voltage/,'Current')}):pd0;
     const val=comp[key]||'';
     if(pd.type==='enum'&&Array.isArray(pd.options)){
       html+='<div class="prop-row"><div class="prop-lbl">'+pd.l+'</div><div style="padding:6px 12px;display:flex;gap:8px;align-items:center">';
@@ -500,7 +503,7 @@ function renderProps(){
         if(comp.type==='netconn')applyNetConnName(comp);
         renderAll();
         // If the radio toggles the component mode, re-render props to show mode-specific fields
-        if(key==='mode')renderProps();
+        if(key==='mode'||(key==='meas'&&comp.type==='source'))renderProps();
       }
     });
   });
@@ -1257,6 +1260,11 @@ function placeComp(type,sp){
     comp.pulse_ton = comp.pulse_ton || '0.001';
     comp.pulse_tperiod = comp.pulse_tperiod || '0.002';
     comp.pulse_ncycles = comp.pulse_ncycles || '0';
+    // Ramp defaults
+    comp.ramp_start = comp.ramp_start || '0';
+    comp.ramp_end = comp.ramp_end || '5';
+    comp.ramp_tdelay = comp.ramp_tdelay || '0';
+    comp.ramp_duration = comp.ramp_duration || '0.01';
     // Behavioural
     comp.beh_eq = comp.beh_eq || '';
   }

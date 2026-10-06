@@ -5,8 +5,8 @@
 .pa-root{
   --pa-bg:var(--bg-panel,#0f1215);--pa-bg2:var(--bg-card,#161b20);--pa-bg3:var(--bg-hover,#1e252d);
   --pa-deep:var(--bg-deep,#0a0c0e);--pa-border:var(--border,#242d36);--pa-border-hi:var(--border-hi,#2e3d4a);
-  --pa-accent:var(--accent,#00c8ff);--pa-hi:var(--text-hi,#e8edf2);--pa-mid:var(--text-mid,#7a92a8);
-  --pa-lo:var(--text-lo,#3d5060);--pa-mono:'Share Tech Mono',ui-monospace,monospace;
+  --pa-accent:var(--accent,#00c8ff);--pa-hi:var(--text-hi,#e8edf2);--pa-mid:var(--text-mid,#a9bccd);
+  --pa-lo:var(--text-lo,#7f95a8);--pa-mono:'Share Tech Mono',ui-monospace,monospace;
   --pa-sans:'Rajdhani',system-ui,sans-serif;
   display:none;
 }
