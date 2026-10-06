@@ -369,7 +369,7 @@ function scrSubckt(name,c){
 // build, and it would also introduce an algebraic loop.)
 function pwmGenSubckt(name,c){
   var f=c.pwm_freq||'10k';
-  var range=c.pwm_range||'5';
+  var range=c.pwm_range||'1';
   var vhigh=c.pwm_vhigh||'12';
   var vlow=c.pwm_vlow||'0';
   var dt=String(c.pwm_deadtime||'0').trim();

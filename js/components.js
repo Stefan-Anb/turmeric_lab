@@ -508,7 +508,7 @@ const CD={
     props:{
       label:{l:'Reference'},
       pwm_freq:{l:'Frequency (Hz)',def:'10k'},
-      pwm_range:{l:'Input range for 100 % (V)',def:'5'},
+      pwm_range:{l:'Input range for 100 % (V)',def:'1'},
       pwm_vhigh:{l:'Output high (V)',def:'12'},
       pwm_vlow:{l:'Output low (V)',def:'0'},
       pwm_deadtime:{l:'Dead time (s)',def:'0'}
