@@ -35,6 +35,16 @@ jobs:
           cp -r js pages-out/js
           cp -r library pages-out/library
 
+      - name: Write build info
+        env:
+          APP_VERSION: ${{ github.event.release.tag_name || github.ref_name }}
+          APP_COMMIT: ${{ github.sha }}
+          APP_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+        run: |
+          cat > pages-out/js/version.js <<EOF
+          window.APP_BUILD={version:'${APP_VERSION}',commit:'${APP_COMMIT}',date:'$(date -u +%Y-%m-%d\ %H:%M\ UTC)',url:'${APP_URL}'};
+          EOF
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 

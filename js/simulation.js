@@ -60,7 +60,7 @@ var simColorAssign={};
 // Both are persisted separately from the schematic so they survive a reload.
 var simAnalysis={
   type:'tran',
-  tran:{tstep:'10u',tstop:'5m',tstart:'',tmax:'',uic:false,trtol:'7'},
+  tran:{tstep:'50n',tstop:'5m',tstart:'',tmax:'',uic:false,trtol:'7'},
   dc:{src:'',start:'0',stop:'5',step:'0.1',use2:false,src2:'',start2:'0',stop2:'5',step2:'1'},
   ac:{sweep:'dec',pts:'20',fstart:'1',fstop:'1Meg'}
 };
@@ -455,7 +455,7 @@ function renderAnalysisPanel(){
   }
   if(a.type==='tran'){
     html+='<div class="sim-grid">'+
-      fld('tran.tstep','Step time',a.tran.tstep,'10u')+
+      fld('tran.tstep','Step time',a.tran.tstep,'50n')+
       fld('tran.tstop','Stop time',a.tran.tstop,'5m')+
       fld('tran.tstart','Start time (opt.)',a.tran.tstart,'0')+
       fld('tran.tmax','Max step (opt.)',a.tran.tmax,'')+
@@ -631,7 +631,7 @@ function resetSimForSchematic(resetSetup){
   simMeasurements.forEach(function(m){delete m.result;});
   if(resetSetup){
     simAnalysis.type='tran';
-    simAnalysis.tran={tstep:'10u',tstop:'5m',tstart:'',tmax:'',uic:false,trtol:'7'};
+    simAnalysis.tran={tstep:'50n',tstop:'5m',tstart:'',tmax:'',uic:false,trtol:'7'};
     simAnalysis.dc={src:'',start:'0',stop:'5',step:'0.1',use2:false,src2:'',start2:'0',stop2:'5',step2:'1'};
     simAnalysis.ac={sweep:'dec',pts:'20',fstart:'1',fstop:'1Meg'};
     simFormulas=[];

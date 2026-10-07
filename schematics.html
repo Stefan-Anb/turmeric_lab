@@ -12,7 +12,7 @@
 <body>
 
 <div id="toolbar">
-  <div class="app-title">TURMERIC<span>LAB</span></div>
+  <div class="app-title" id="app-logo" onclick="showAbout()" title="About TurmericLab">TURMERIC<span>LAB</span></div>
   <div class="tb-sep"></div>
   <button class="tb-btn active" id="btn-select" onclick="setMode('select')">
     <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 1L1 9L4 7L6 11L7.5 10.5L5.5 6.5L9 6Z" stroke="currentColor" stroke-width="1" fill="currentColor" opacity=".7"/></svg>SELECT
@@ -391,6 +391,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.iife.min.js"></script>
+<script src="js/version.js"></script>
 <script src="js/components.js"></script>
 <script src="js/schematic.js"></script>
 <script src="js/netlist.js"></script>

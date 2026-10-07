@@ -14,3 +14,16 @@ Einbinden der Echtzeit-Simulation (mit Javscript-Code)
 * Wrapper für Netznamen? -> bestenfalls Auto-Completion
 
 * Batch-Download der Internal Library
+
+* Info-Dialog mit Version, Git-Commit-ID etc.
+
+* Netzname sollte wenn möglich auf einem waagrechten Element angezeigt werden (am besten das längste Element)
+* Fix von Netz zeichnen, wenn man senkrecht aus einem Element herausfährt (reproduzieren und dann dem LLM geben)
+* Beim kopieren von Schaltungsgruppen bleiben manchmal einzelne Elemente stehen
+* Schematic klonen
+
+* Automatische Anpassung der Step Size (Abhängigkeit Modell/Einstellung der Spannungsquellen)
+
+* Notes können nicht kopiert werden?
+* Kopieren von Textlabel erhält nicht den Text. Dito für Netlabel
+* Funktionsumfang Markdown?

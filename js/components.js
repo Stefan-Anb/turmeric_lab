@@ -100,8 +100,8 @@ function drawTransistorLabels(g,v,defLbl){
 // ═══════════════════════════════════════════════════
 // TINY VANILLA MARKDOWN RENDERER (for the Note element)
 // Deliberately minimal — headers, bold/italic/strikethrough/inline code,
-// unordered lists, blank-line paragraph breaks. No tables, links, images,
-// nested lists, etc. Input is HTML-escaped first, so markdown source can
+// unordered/ordered lists, simple pipe tables (with :--: alignment),
+// blank-line paragraph breaks. No links, images, nested lists, etc. Input is HTML-escaped first, so markdown source can
 // never inject markup.
 // ═══════════════════════════════════════════════════
 function renderMiniMarkdown(src){
@@ -114,19 +114,41 @@ function renderMiniMarkdown(src){
     return s;
   }
   var lines=text.split('\n');
-  var out=[],listOpen=false;
-  function closeList(){ if(listOpen){out.push('</ul>');listOpen=false;} }
+  var out=[],listOpen=null; // null | 'ul' | 'ol'
+  function closeList(){ if(listOpen){out.push('</'+listOpen+'>');listOpen=null;} }
+  function openList(tag){ if(listOpen!==tag){closeList();out.push('<'+tag+'>');listOpen=tag;} }
+  function cells(row){
+    return row.trim().replace(/^\|/,'').replace(/\|$/,'').split('|').map(function(c){return c.trim();});
+  }
+  var sepRe=/^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
   for(var i=0;i<lines.length;i++){
     var line=lines[i];
     var h=line.match(/^(#{1,3})\s+(.*)$/);
     var li=line.match(/^[-*]\s+(.*)$/);
-    if(h){
+    var ol=line.match(/^\d+[.)]\s+(.*)$/);
+    if(line.indexOf('|')>=0&&i+1<lines.length&&lines[i+1].indexOf('-')>=0&&sepRe.test(lines[i+1])){
+      // Table: header row, separator row, then body rows while they contain '|'
+      closeList();
+      var al=cells(lines[i+1]).map(function(c){var l=c.charAt(0)===':',r=c.charAt(c.length-1)===':';return l&&r?'center':(r?'right':'');});
+      var cellHtml=function(tag,txt,k){return '<'+tag+(al[k]?' style="text-align:'+al[k]+'"':'')+'>'+inline(txt)+'</'+tag+'>';};
+      var tbl='<table><thead><tr>'+cells(line).map(function(c,k){return cellHtml('th',c,k);}).join('')+'</tr></thead><tbody>';
+      i+=2;
+      while(i<lines.length&&lines[i].indexOf('|')>=0){
+        tbl+='<tr>'+cells(lines[i]).map(function(c,k){return cellHtml('td',c,k);}).join('')+'</tr>';
+        i++;
+      }
+      i--;
+      out.push(tbl+'</tbody></table>');
+    } else if(h){
       closeList();
       var lvl=h[1].length;
       out.push('<h'+lvl+'>'+inline(h[2])+'</h'+lvl+'>');
     } else if(li){
-      if(!listOpen){out.push('<ul>');listOpen=true;}
+      openList('ul');
       out.push('<li>'+inline(li[1])+'</li>');
+    } else if(ol){
+      openList('ol');
+      out.push('<li>'+inline(ol[1])+'</li>');
     } else {
       closeList();
       if(line.trim()==='') out.push('<br>');
@@ -520,7 +542,7 @@ const CD={
       pwm_range:{l:'Input range for 100 % (V)',def:'1'},
       pwm_vhigh:{l:'Output high (V)',def:'12'},
       pwm_vlow:{l:'Output low (V)',def:'0'},
-      pwm_deadtime:{l:'Dead time (s)',def:'0'}
+      pwm_deadtime:{l:'Dead time (s)',def:'200n'}
     },
     pins:[{x:-80,y:0,n:'IN'},
           {x:80,y:-60,n:'OUTH'},{x:80,y:-20,n:'COMH'},

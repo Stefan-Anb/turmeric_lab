@@ -348,7 +348,16 @@ function renderWires(){
 
     // Net name label
     if(w.showLabel&&w.net&&w.points.length>=2){
-      var mi=Math.floor((w.points.length-1)/2);
+      // Prefer the longest horizontal element; only fall back to a vertical
+      // one (rotated text) when the wire has no horizontal element at all.
+      var bestH=-1,bestHLen=0,bestV=-1,bestVLen=0;
+      for(var si=0;si<w.points.length-1;si++){
+        var sa=w.points[si],sb=w.points[si+1];
+        var hl=Math.abs(sb.x-sa.x),vl=Math.abs(sb.y-sa.y);
+        if(sa.y===sb.y&&hl>bestHLen){bestHLen=hl;bestH=si;}
+        else if(sa.x===sb.x&&vl>bestVLen){bestVLen=vl;bestV=si;}
+      }
+      var mi=bestH>=0?bestH:(bestV>=0?bestV:Math.floor((w.points.length-1)/2));
       var lp1=w.points[mi],lp2=w.points[mi+1];
       var lx=(lp1.x+lp2.x)/2,ly=(lp1.y+lp2.y)/2;
       var isVert=(lp1.x===lp2.x);
@@ -1787,15 +1796,17 @@ function cutSelected(){
 
 // Fresh reference designators for a batch of pasted components, exactly as if
 // each one had been placed anew (nextRefNum), so copy/paste never produces
-// duplicate SPICE refs. Net Connectors keep their fixed 'NET' placeholder
-// label instead (placeComp does the same) — their real name is re-derived
-// from whatever net they land on, via applyNetConnName.
+// duplicate SPICE refs. Net Connectors and text labels keep their label
+// (it is their content); a Net Connector's name is re-derived from the net
+// it lands on via applyNetConnName, if any.
 function computePasteLabels(bufferComps){
   var counters={};
   var labels=[];
   for(var i=0;i<bufferComps.length;i++){
     var oc=bufferComps[i];
-    if(oc.type==='netconn'){labels.push('NET');continue;}
+    // For these types `label` IS the content (net name / visible text), not a
+    // reference designator, so it must survive the copy unchanged.
+    if(oc.type==='netconn'||oc.type==='textlabel'){labels.push(oc.label);continue;}
     var def=CD[oc.type];
     var prefix=def?def.lbl:'';
     if(!(prefix in counters))counters[prefix]=nextRefNum(prefix);
@@ -3307,6 +3318,34 @@ function showNetlist(){
   textArea.rows=Math.max(10,netlist.split('\n').length+2);
   modal.style.display='flex';
   modal.onclick=function(e){if(e.target===modal)closeNetlist();};
+}
+
+// ═══ ABOUT DIALOG (click on the logo) ═══
+// Build info comes from js/version.js, which the Pages deploy workflow
+// overwrites; a local checkout only has the 'local build' defaults.
+function showAbout(){
+  if(document.getElementById('about-overlay'))return;
+  var b=window.APP_BUILD||{};
+  var rows=[['Version',b.version||'unknown']];
+  if(b.commit){
+    var short=esc(b.commit.slice(0,7));
+    rows.push(['Git commit',b.url&&/^https:\/\//.test(b.url)?'<a href="'+esc(b.url)+'" target="_blank" rel="noopener" style="color:var(--accent)">'+short+'</a>':short]);
+  }else rows.push(['Git commit','not available in local builds']);
+  if(b.date)rows.push(['Built',esc(b.date)]);
+  var ov=document.createElement('div');
+  ov.id='about-overlay';ov.className='dialog-overlay';
+  ov.innerHTML='<div class="dialog" style="width:340px">'+
+    '<div class="dialog-header">TurmericLab</div>'+
+    '<div style="padding:14px 16px"><table class="about-table">'+
+    rows.map(function(r){return '<tr><td>'+r[0]+'</td><td>'+(r[0]==='Version'?esc(r[1]):r[1])+'</td></tr>';}).join('')+
+    '</table></div>'+
+    '<div class="dialog-footer"><button class="tb-btn" id="about-close">CLOSE</button></div></div>';
+  function close(){ov.remove();document.removeEventListener('keydown',onKey,true);}
+  function onKey(e){if(e.key==='Escape'){e.stopPropagation();close();}}
+  ov.addEventListener('click',function(e){if(e.target===ov)close();});
+  document.addEventListener('keydown',onKey,true);
+  document.body.appendChild(ov);
+  document.getElementById('about-close').onclick=close;
 }
 
 function closeNetlist(){
