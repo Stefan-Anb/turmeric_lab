@@ -1333,6 +1333,15 @@ dem Bauteil. Die Hover-Anzeige folgt derselben Grenze: der gestrichelte Rahmen
 (`.power-probe-hover`) erscheint nur ueber dem Koerper, nahe am Pin uebernimmt
 der Strompfeil (`drawCurrentProbeMarker`).
 
+Danach (nur wenn kein Pin getroffen wurde) hat ein **Netz** Vorrang vor dem
+Bauteil: `probeNetPointAt()` (app.js) liefert den Startpunkt fuer einen
+Netz-Probe, wenn unter dem Cursor eine Leitung (`findWireSeg`, 10 px) oder
+Junction (12 px) liegt oder das Bauteil ein **Netzlabel** (`netconn`) ist (dann
+wird dessen Netz ueber seinen Pin geprobt, kein Power-Probe-Fehler). Grund: die
+grosse Trefferflaeche eines Bauteils (z. B. 260x40 beim Netzlabel) verdeckte
+sonst Netze, auch wenn kein Bauteil daneben war. Erst danach folgt die
+Power-Probe, und davor der Alternative-Senken-Check.
+
 **Power-Probe** (`togglePowerProbe()` in simulation.js). Klick auf den Koerper
 eines einfachen Bauteils legt eine Formel `P(<Ref>)` in `simFormulas` an
 (Feld `powerOf` = Bauteil-ID), zweiter Klick entfernt sie. Gleichungen:
@@ -1359,6 +1368,12 @@ Komponentenklick loest keine Power-Probe aus):
   fuegt `v(net)`, per Drag `v(a,b)` bzw. Stroeme (siehe Kapitel 13) an der
   Caret-Position ein und loest ein `input`-Event aus, sodass `comp[key]` live
   folgt. Hinweis bei unbenannten Netzen (`nNNN`), weil deren Nummer instabil ist.
+Die Equation-Senke gilt nur, solange das Feld noch im DOM steht und seine
+Quelle die einzige Auswahl ist (`eqSinkActive()`); `renderProps()` setzt
+`eqTarget` bei jedem Aufruf als Erstes zurueck (auch beim Abwaehlen mit offenem
+Simulationspanel, wo die Funktion frueh zurueckkehrt). Der Measurement-Dialog
+ist nur Senke, solange `simMeasureDraft` gesetzt ist (`closeMeasureModal()`
+loescht es).
 Beim Testen per Skript ist zu beachten: ohne Fenster-Fokus (`document.hasFocus()`)
 feuert `el.focus()` kein `focus`-Event.
 

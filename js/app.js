@@ -283,7 +283,7 @@ function renderComps(){
     g.addEventListener('mousemove',(function(c){return function(e){
       if(S.mode!=='probe'||typeof supportsPowerProbe!=='function'||!supportsPowerProbe(c)){this.classList.remove('power-probe-hover');return;}
       var pt=svgPt(e),np=findPin(pt.x,pt.y,18);
-      if(np&&np.type==='pin'){this.classList.remove('power-probe-hover');return;}
+      if((np&&np.type==='pin')||probeNetPointAt(pt,c.id)){this.classList.remove('power-probe-hover');return;}
       if(!this.classList.contains('power-probe-hover')){this.classList.add('power-probe-hover');hint('Click: power probe P('+(c.label||c.type)+')');}
     };})(comp));
     g.addEventListener('mouseleave',function(){this.classList.remove('power-probe-hover');});
@@ -1121,6 +1121,21 @@ function onCanvasDown(e){
   if(S.mode==='probe'){startProbeDrag(e,pt);return;}
 }
 
+// Probe mode: the point to start a NET probe from when the click hit a
+// component's hit area but really means a net: a wire or junction near the
+// cursor, or any click on a net label (netconn), which probes its own net.
+// Returns null when the click is for the component itself.
+function probeNetPointAt(pt,compId){
+  var comp=S.components.find(function(c){return c.id===compId;});
+  if(comp&&comp.type==='netconn'){var pp=compPinPos(comp,0);return {x:pp.x,y:pp.y};}
+  if(findWireSeg(pt.x,pt.y,10))return pt;
+  for(var i=0;i<S.junctions.length;i++){
+    var j=S.junctions[i];
+    if(Math.abs(j.x-pt.x)<=12&&Math.abs(j.y-pt.y)<=12)return {x:j.x,y:j.y};
+  }
+  return null;
+}
+
 function onCompDown(e,compId){
   if(e.button!==0)return;e.stopPropagation();
   if(S.mode==='wire'){handleWireClick(svgPt(e));return;}
@@ -1130,6 +1145,10 @@ function onCompDown(e,compId){
     // net/current probe uses elsewhere, wider than the pin ring) probes the pin.
     var nearPin=findPin(svgPt(e).x,svgPt(e).y,18);
     if(nearPin&&nearPin.type==='pin'){toggleProbeAt(nearPin.x,nearPin.y);return;}
+    // A net under the cursor (wire, junction, or the flag of a net label) is
+    // probed as a net: the component's big hit area must never hide it.
+    var npt=svgPt(e),netPt=probeNetPointAt(npt,compId);
+    if(netPt){beginProbeDrag(netPt);return;}
     // An alternative probe target (equation field, measurement dialog) owns the clicks.
     if(eqSinkActive()||(typeof simMeasureDraft!=='undefined'&&simMeasureDraft)){hint('Probe a net or pin: the equation/measurement field is receiving the signal');return;}
     if(!togglePowerProbe(compId))hint('No power probe for this part (only simple devices and transistors)');
