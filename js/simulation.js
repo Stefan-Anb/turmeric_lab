@@ -2772,8 +2772,13 @@ function probeIntoEquation(x,y){
   if(tgt){
     var cand=null;
     for(var i=0;i<tgt.cv.cands.length;i++)if(/^i\(v/i.test(tgt.cv.cands[i])){cand=tgt.cv.cands[i].toLowerCase();break;}
-    if(!cand){hint('A behavioural equation can only use currents of voltage sources, i(v...). Put a 0 V source in series to measure this current.');return true;}
-    txt=(tgt.cv.sign<0?'-':'')+cand;
+    var pc=S.components.find(function(c){return c.id===tgt.compId;});
+    var sk=pc?senseKind(pc.type):null;
+    if(!cand&&pc&&DEVICE_SENSE_TYPES.indexOf(pc.type)>=0&&pc.label&&(sk!=='two'||tgt.pinIdx<2)){
+      // The netlist adds the 0 V sense source itself, see injectDeviceCurrentSenses.
+      txt=(sk==='two')?((tgt.pinIdx===1?'-':'')+'i('+pc.label+')'):('i('+pc.label+'.'+CD[pc.type].pins[tgt.pinIdx].n+')');
+    }else if(!cand){hint('A behavioural equation can only use currents of voltage sources i(v...), of R, C, L, diodes i(R1) and of transistor pins i(Q1.C). Put a 0 V source in series to measure this current.');return true;}
+    else txt=(tgt.cv.sign<0?'-':'')+cand;
   }else{
     var net=_probeNet(x,y);
     if(!net){hint('No net to probe here');return true;}

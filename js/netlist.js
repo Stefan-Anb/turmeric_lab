@@ -771,6 +771,71 @@ function buildStepPlan(){
 
 // `opts.paramValues` ({name -> value string}) overrides swept parameters for one
 // run of a parameter sweep; without it they sit at their first value.
+// ═══ DEVICE CURRENTS IN BEHAVIOURAL EQUATIONS ═══
+// ngspice B/E/G equations only know i(Vsource) branch currents, not device
+// currents (LTspice allows I(R1), Ic(Q1)). So an equation may say
+//   i(R1)  i(C1)  i(L1)  i(D1)      two-terminal parts: into the first pin
+//   i(Q1.C) i(Q1.B) i(Q1.E)         BJT terminals
+//   i(M1.D) i(M1.G) i(M1.S)         MOSFET terminals
+// and this pass makes that work: the terminal in question is moved behind a
+// 0 V sense source (VSNS_<ref>[_<pin>]) and the term becomes i(VSNS_...), which
+// is the current flowing INTO that terminal of the device (use -i(...) for the
+// other pin of a two-terminal part). The sense sources are invisible in the
+// schematic and cost nothing electrically.
+var DEVICE_SENSE_TYPES=['resistor','capacitor','inductor','diode','led','zener','npn','pnp','nmos','pmos'];
+// pin letter -> token index in the emitted device card (name n1 n2 n3 model)
+var SENSE_PINS={bjt:{c:1,b:2,e:3},mos:{d:1,g:2,s:3}};
+function senseKind(t){return (t==='npn'||t==='pnp')?'bjt':((t==='nmos'||t==='pmos')?'mos':'two');}
+function injectDeviceCurrentSenses(lines,refMap){
+  var byName={};
+  for(var i=0;i<S.components.length;i++){
+    var c=S.components[i];
+    if(DEVICE_SENSE_TYPES.indexOf(c.type)<0)continue;
+    var ref=refMap[c.id];if(!ref)continue;
+    var ent={ref:ref,kind:senseKind(c.type)};
+    byName[ref.toLowerCase()]=ent;
+    if(c.label)byName[String(c.label).toLowerCase()]=ent;
+  }
+  var used=[],usedKey={};
+  var eqRe=/(?:cur|vol|\b[IV])\s*=\s*'([^']*)'/;
+  for(var li=0;li<lines.length;li++){
+    var m=eqRe.exec(lines[li]);if(!m)continue;
+    var expr=m[1];
+    var out=expr.replace(/\bi\(\s*([A-Za-z0-9_]+)(?:\.([A-Za-z]))?\s*\)/gi,function(all,nm,pin){
+      var ent=byName[nm.toLowerCase()];
+      if(!ent)return all;
+      var idx,key;
+      if(ent.kind==='two'){
+        if(pin)return all;
+        idx=1;key=ent.ref;
+      }else{
+        var pl=pin?pin.toLowerCase():'';
+        idx=SENSE_PINS[ent.kind][pl];
+        if(!idx)return all;
+        key=ent.ref+'_'+pl;
+      }
+      if(!usedKey[key]){usedKey[key]=true;used.push({ref:ent.ref,idx:idx,key:key});}
+      return 'i(VSNS_'+key+')';
+    });
+    if(out!==expr){
+      var at=m.index+m[0].indexOf("'")+1;
+      lines[li]=lines[li].slice(0,at)+out+lines[li].slice(at+expr.length);
+    }
+  }
+  for(var u=0;u<used.length;u++){
+    var us=used[u];
+    for(var k=0;k<lines.length;k++){
+      var tok=lines[k].split(/\s+/);
+      if(tok[0]!==us.ref||tok.length<=us.idx)continue;
+      var orig=tok[us.idx];
+      tok[us.idx]=us.key+'_sns';
+      lines[k]=tok.join(' ');
+      lines.splice(k+1,0,'VSNS_'+us.key+' '+orig+' '+us.key+'_sns 0');
+      break;
+    }
+  }
+}
+
 function generateNetlist(opts){
   tempNetNamesGen={};
   tempNetCounterGen=0;
@@ -1163,5 +1228,6 @@ function generateNetlist(opts){
     }
   }
 
+  injectDeviceCurrentSenses(lines,refMap);
   return lines.join('\n');
 }
