@@ -404,6 +404,7 @@ function updateStatus(){
 // Property keys that never take a numeric value, hence get no parameter button.
 var PARAM_BTN_SKIP_KEYS=['label','text','model','part'];
 function renderProps(){
+  eqTarget=null;   // any panel rebuild/hand-over drops the equation target (re-set on focus)
   // The simulation settings share the properties panel. They stay in front only
   // while nothing is selected — selecting a component hands the panel back to
   // the properties (the plot pane itself stays open). The settings can be
@@ -510,7 +511,6 @@ function renderProps(){
     }
   }
   pc.innerHTML=html;
-  eqTarget=null;   // a fresh panel: forget the previously focused equation field
   // attach live listeners: text inputs
   pc.querySelectorAll('.prop-input').forEach(function(inp){
     var key=inp.getAttribute('data-key');
@@ -560,6 +560,13 @@ function renderProps(){
 // The equation field of the selected component that was last focused (if any).
 var eqTarget=null;
 
+// Is an equation field currently the receiver of probed signals? Only while it
+// is still in the DOM and its component is still the single selection.
+function eqSinkActive(){
+  var t=eqTarget;
+  return !!(t&&t.el&&t.el.isConnected&&S.selected.length===1&&S.selected[0].id===t.compId);
+}
+
 // Probe mode + a focused/last-focused equation field: the probed signal is
 // typed into that field (at the caret) instead of being added to the plot.
 // Returns true when the text was inserted (the caller then skips its normal
@@ -594,7 +601,7 @@ function setMode(m){
   svg.style.cursor=m==='wire'||m==='place'?'crosshair':(m==='probe'?'crosshair':'default');
   if(m!=='place')document.querySelectorAll('.comp-btn').forEach(function(b){b.classList.remove('selected');});
   hint(m==='wire'?'Click to start wire \u2014 click again or pin to finish':m==='place'?'Click to place':
-    m==='probe'?(eqTarget&&eqTarget.el&&eqTarget.el.isConnected?'Click a net or pin to insert its signal into the equation, drag for v(a,b)':'Click to probe net or pin \u2014 drag to probe two points'):m==='select'?'Click to select \u00b7 drag to move \u00b7 hover pin to start wire':'Click to select \u00b7 drag to move \u00b7 hover pin to start wire');
+    m==='probe'?(eqSinkActive()?'Click a net or pin to insert its signal into the equation, drag for v(a,b)':'Click to probe net or pin \u2014 drag to probe two points'):m==='select'?'Click to select \u00b7 drag to move \u00b7 hover pin to start wire':'Click to select \u00b7 drag to move \u00b7 hover pin to start wire');
 }
 
 function selectComp(type,ev){
@@ -1124,7 +1131,7 @@ function onCompDown(e,compId){
     var nearPin=findPin(svgPt(e).x,svgPt(e).y,18);
     if(nearPin&&nearPin.type==='pin'){toggleProbeAt(nearPin.x,nearPin.y);return;}
     // An alternative probe target (equation field, measurement dialog) owns the clicks.
-    if((eqTarget&&eqTarget.el&&eqTarget.el.isConnected)||(typeof simMeasureDraft!=='undefined'&&simMeasureDraft)){hint('Probe a net or pin: the equation/measurement field is receiving the signal');return;}
+    if(eqSinkActive()||(typeof simMeasureDraft!=='undefined'&&simMeasureDraft)){hint('Probe a net or pin: the equation/measurement field is receiving the signal');return;}
     if(!togglePowerProbe(compId))hint('No power probe for this part (only simple devices and transistors)');
     return;
   }

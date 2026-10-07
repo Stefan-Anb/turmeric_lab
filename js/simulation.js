@@ -2767,7 +2767,7 @@ function eqNetHint(net){
   return /^n\d{3}$/.test(net)?' (unnamed net: give it a name to keep the equation stable when you edit the schematic)':'';
 }
 function probeIntoEquation(x,y){
-  if(typeof eqTarget==='undefined'||!eqTarget||!eqTarget.el||!eqTarget.el.isConnected)return false;
+  if(typeof eqSinkActive!=='function'||!eqSinkActive())return false;
   var tgt=currentProbeTargetAt(x,y),txt=null;
   if(tgt){
     var cand=null;
@@ -2810,7 +2810,7 @@ function probeDiffIntoMeasurement(a,b){
   return true;
 }
 function probeDiffIntoEquation(a,b){
-  if(typeof eqTarget==='undefined'||!eqTarget||!eqTarget.el||!eqTarget.el.isConnected)return false;
+  if(typeof eqSinkActive!=='function'||!eqSinkActive())return false;
   var aOk=a&&a!=='0',bOk=b&&b!=='0';
   if(!aOk&&!bOk){hint('No nets to probe');return true;}
   var txt=(aOk&&bOk)?(a===b?'0':'v('+a+','+b+')'):(aOk?'v('+a+')':'-v('+b+')');
