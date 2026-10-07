@@ -1,6 +1,6 @@
 # TurmericLab: Code-Review und technische Dokumentation
 
-> Stand: 2026-06-22. Diese Datei dokumentiert die Codebasis, die verwendeten
+> Stand: 2026-10-07. Diese Datei dokumentiert die Codebasis, die verwendeten
 > mathematisch-algorithmischen Prinzipien, gefundene Inkonsistenzen sowie
 > Konzepte für eine generische Netzlistengenerierung und die Einbindung von
 > NGSpice-WASM. Es werden in diesem Dokument **keine** Code-Änderungen
@@ -271,6 +271,13 @@ saw > V(IN) + dv — beide Einschaltflanken verzögert, Ausschaltflanken
 unverändert. Verifiziert: 10 kHz, IN = 1 V bei Range 5 V → 17,9 % statt 20 %
 (2 µs Totzeit), kein Überlappen der Ausgänge.
 
+*Flanken (Stand 2026-10-06/07).* Die Ausgänge sind keine harten `?:`-Sprünge
+mehr, sondern 10-ns-Rampen (`min(max(x/eps,0),1)`-Produkte, `eps` = 10 ns in
+Sägezahnspannung umgerechnet). Unstetige B-Quellen trieben den Solver am Gate
+(Cgs/Cgd) auf "timestep too small". Der Low-Side-Ausgang schaltet kurz vor dem
+Sägezahn-Reset (`saw = Range`) ab, damit der Reset keinen Sprung erzeugt.
+Standard-Totzeit ist 200n (`pwm_deadtime`).
+
 Strommessung an diesen Subcircuits: NGSpice legt die Ströme der Bauteile
 *innerhalb* eines Subcircuits als `i(v.xscr1.vsense)` bzw. `i(b.xpwm1.bouth)`
 ab, darüber sind Anodenstrom (SCR) und Ausgangsströme (PWM, jeweils an OUTH/COMH
@@ -352,6 +359,11 @@ Die Verdrahtung läuft über Netznamen (Draht-Stubs mit gleichem Namen = ein Kno
 Eine schaltende Variante (3 × PWM-Generator + 6 VDMOS an 600 V) bricht in
 ngspice bei 182 µs mit "Timestep too small" am ersten MOSFET ab; sie ist nicht
 Teil der Bibliothek.
+
+**ESR/DCR an C und L.** Kondensator und Spule haben das optionale Property `esr`
+("Serienwiderstand"). Ist es ungleich 0, emittiert `generateNetlist()` statt
+`C1 a b val` die Kette `C1 a n_C1_esr val` und `RC1_esr n_C1_esr b esr`; der
+Bauteilstrom `@C1[i]` bleibt der Strom durch beide.
 
 ### 3.2 Konkrete Fehler in der Netzlistengenerierung
 
@@ -948,7 +960,12 @@ Grafisch resizable über denselben Eck-Handle-Mechanismus wie Image/Blanket
 [components.js](js/components.js) ist ein bewusst minimaler Vanilla-Parser
 (keine Bibliothek): Überschriften `#`/`##`/`###`, `**fett**`/`__fett__`,
 `*kursiv*`/`_kursiv_`, `` `code` ``, `~~durchgestrichen~~`, ungeordnete Listen
-(`-`/`*`) und Leerzeilen als Absatzumbruch. Die Eingabe wird **vor** dem
+(`-`/`*`), nummerierte Listen (`1.`/`1)`), einfache Pipe-Tabellen (Kopfzeile,
+Trennzeile mit optionaler Ausrichtung `:--`/`:-:`/`--:`, danach Zeilen mit `|`)
+und Leerzeilen als Absatzumbruch. Tabellenrahmen nutzen das
+Separate-Border-Modell (`border-collapse:separate`), weil verbundene Rahmen
+einen halben Pixel ueber die Tabelle ragen und vom `overflow:hidden` der Notiz
+je nach Rasterposition abgeschnitten werden. Die Eingabe wird **vor** dem
 Parsen HTML-escaped (`&`,`<`,`>`), sodass Markdown-Quelltext kein Markup
 einschleusen kann — das Ergebnis geht direkt per `innerHTML` in den
 `<div>` der Notiz.
@@ -1289,6 +1306,127 @@ mit logarithmischer x-Achse.
 **Beispiele.** `library/param_load_sweep.svg` (DC-Sweep, Load-Mode-Quelle,
 Strom als Parameter) und `library/param_rc_sweep.svg` (RC, R dezadisch
 gesweept, Anstiegszeit ueber R im Report-Plot).
+
+## 11a. Simulation: Fortschritt, .ac und .measure
+
+- **Sweep-Fortschritt.** `simStatus(msg,pct)` faerbt den Statusstreifen als
+  Fortschrittsbalken (CSS-Variable `--pct`). Waehrend eines Sweeps zeigt der
+  Ticker (`startSimTicker()`) "Step i/n · % · ~Restzeit". Die Engine meldet
+  keinen Fortschritt innerhalb eines Laufs; der Anteil des laufenden Laufs wird
+  aus der Durchschnittsdauer der fertigen geschaetzt (bei 99 % gedeckelt,
+  `plan.durs`, `plan.runT0`).
+- **`.ac` und `.save`.** Im WASM-Build haengt jeder `@dev[...]`-Vektor in einer
+  `.ac`-Analyse die Engine auf ("no writable vector found"). Deshalb fordert
+  `buildSaveVectors(acOnly)` dort nur `i(Vquelle)` an; `buildFullNetlist()`
+  erkennt `.ac` in Analysekarte oder Direktiven.
+- **`.measure` und Stromvektoren.** Der Plot nennt Geraetestroeme `i(@l1[i])`,
+  `.measure` kennt nur `@l1[i]` (mit dem `i(...)`-Mantel schlaegt es stumm
+  fehl). `measureSigForSpice()` entfernt den Mantel in allen Signalfeldern
+  der Messung, bevor die Direktive geschrieben wird.
+
+## 12. Probe-Modus: Senken, Power-Probe, Gleichungen
+
+**Klick-Prioritaet im Probe-Modus.** Pin vor Bauteilkoerper: `onCompDown()`
+prueft zuerst `findPin(…,18)`; liegt ein Pin im 18-px-Radius (groesser als der
+9-px-Pin-Ring), wird der Pin geprobt (Strom-Probe). Nur sonst gilt der Klick
+dem Bauteil. Die Hover-Anzeige folgt derselben Grenze: der gestrichelte Rahmen
+(`.power-probe-hover`) erscheint nur ueber dem Koerper, nahe am Pin uebernimmt
+der Strompfeil (`drawCurrentProbeMarker`).
+
+**Power-Probe** (`togglePowerProbe()` in simulation.js). Klick auf den Koerper
+eines einfachen Bauteils legt eine Formel `P(<Ref>)` in `simFormulas` an
+(Feld `powerOf` = Bauteil-ID), zweiter Klick entfernt sie. Gleichungen:
+Zweipole (R, Diode, LED, Z-Diode, Schalter) `(V(a)-V(b))*I(ref)`; BJT
+`Vce*I(ref.C)+Vbe*I(ref.B)`; MOSFET `Vds*I(ref.D)`. Masse-Knoten entfallen.
+Nicht unterstuetzt: C, L, Trafo (speichern nur), Quellen, ICs/Subcircuits.
+Die Netznamen sind in der Formel nur eine Momentaufnahme: unbenannte Netze
+werden bei Umbauten umnummeriert. Deshalb leitet `refreshPowerFormulas()` am
+Anfang jedes Laufs (`runSimulation()`) Ausdruck und Namen neu aus dem Bauteil
+ab und entfernt die Probe, wenn das Bauteil fehlt oder beide Anschluesse auf
+Masse liegen. Editiert der Nutzer den Ausdruck von Hand, wird `powerOf`
+geloescht und die Formel ist eine normale. Fuer die Transistorstroeme gibt es
+Formel-Aliase `I(ref.PIN)` (`formulaAliases()`, nur Pins mit Vorzeichen +1).
+
+**Alternative Probe-Senken.** Ein Probe-Klick kann statt eines Plot-Probes ein
+Signal in ein Eingabefeld schreiben. Solange eine solche Senke aktiv ist, wird
+der Plot nicht veraendert (`S.probes` und `simFormulas` bleiben unberuehrt,
+Komponentenklick loest keine Power-Probe aus):
+- **Measurement-Dialog** (`simMeasureDraft`): `probeIntoMeasurement()` /
+  `probeDiffIntoMeasurement()` fuellen nur das Signalfeld.
+- **Equation-Feld** einer Behavioural-Quelle: Properties mit `eq:true`
+  (`beh_eq`) merken sich das zuletzt fokussierte Feld in `eqTarget`
+  (app.js, wird bei jedem `renderProps()` zurueckgesetzt). `probeIntoEquation()`
+  fuegt `v(net)`, per Drag `v(a,b)` bzw. Stroeme (siehe Kapitel 13) an der
+  Caret-Position ein und loest ein `input`-Event aus, sodass `comp[key]` live
+  folgt. Hinweis bei unbenannten Netzen (`nNNN`), weil deren Nummer instabil ist.
+Beim Testen per Skript ist zu beachten: ohne Fenster-Fokus (`document.hasFocus()`)
+feuert `el.focus()` kein `focus`-Event.
+
+## 13. Behavioural-Quellen: Gleichungen und Geraetestroeme
+
+Mode `BEHAV` einer Quelle erzeugt `E…` (Anzeige Spannung) mit `vol='…'` bzw.
+`G…` (Anzeige Strom) mit `cur='…'`. **`cur=` an einer E-Quelle laesst den
+WASM-Build haengen**, das war ein frueherer Fehler in `generateNetlist()`.
+
+ngspice kennt in B/E/G-Ausdruecken nur `v(n)`, `v(a,b)` und `i(Vquelle)`;
+`@r1[i]` wird nicht akzeptiert (Engine haengt). Wie in LTspice sollen aber
+Bauteilstroeme nutzbar sein. `injectDeviceCurrentSenses()` (netlist.js, laeuft
+am Ende von `generateNetlist()`) erledigt das als Nachbearbeitung der Zeilen:
+
+- Syntax: `i(R1)` (R, C, L, Diode, LED, Z-Diode: Strom in den ersten Pin,
+  zweiter Pin `-i(R1)`), `i(Q1.C|B|E)`, `i(M1.D|G|S)`. Name = Label oder
+  SPICE-Referenz, Gross-/Kleinschreibung egal.
+- Pro benutzter Klemme wird der entsprechende Knoten der Bauteilzeile durch
+  `<key>_sns` ersetzt und `VSNS_<key> <orig> <key>_sns 0` eingefuegt; im
+  Ausdruck steht dann `i(VSNS_<key>)`. Elektrisch ohne Wirkung, im Schaltplan
+  unsichtbar. Die Gleichung ist erlaubt in `cur=`/`vol=`/`I=`/`V=` mit
+  Hochkommas (Funktionsblock `mathblk` und PWM-Subcircuits sind nicht betroffen,
+  sie liegen in Subcircuits und sehen die Netze des Schaltplans nicht).
+- Nicht abgedeckt: Schalter, Trafo, ICs. Dort bleibt nur der Umweg ueber eine
+  0-V-Quelle in Reihe.
+- Beim Probe-Klick auf einen Pin im Equation-Feld wird bei Spannungsquellen
+  `i(vname)`, bei den obigen Bauteilen `i(Label)` bzw. `i(Label.PIN)` eingefuegt.
+
+Beispiel: `library/current_source.svg` (CS4, `i(R1)+i(R2)+i(R3)`).
+
+## 14. Transient ohne Gleichstrompfad (UIC)
+
+Knoten, die nur ueber Kondensatoren und Stromquellen mit Masse verbunden sind
+(z. B. thermische RC-Leiter an einer Stromquelle), haben keinen
+Arbeitspunkt: ngspice meldet "singular matrix", scheitert an allen Hilfsverfahren
+und startet mit einem unbrauchbaren "Transient op". `findFloatingDcNodes()`
+(simulation.js) bildet aus den Zeilen der generierten Netzliste einen
+Union-Find-Graphen (C und I zaehlen als offen; alle anderen Elemente verbinden
+grosszuegig alle ihre Knoten, Subcircuit-Rumpfe werden ignoriert, damit es
+nie zu Fehlalarmen kommt). `buildFullNetlist()` haengt bei `.tran` und
+Treffern automatisch `uic` an und schreibt eine Notiz ins Log. Fuer `.op`,
+`.ac`, `.dc` bleibt es bei der ngspice-Meldung. Die Standard-Schrittweite
+(`Tstep`) ist 50n, weil PWM-Quellen sonst nicht zuverlaessig aufgeloest werden;
+die Standard-Totzeit des PWM-Generators ist 200n.
+
+## 15. Editor-Verhalten (Kopieren, Routing, Verschieben, Info-Dialog)
+
+- **Copy/Paste:** `computePasteLabels()` vergibt neue Referenzen, ausser fuer
+  `netconn` und `textlabel`: dort ist `label` der Inhalt (Netzname bzw. Text)
+  und bleibt erhalten; ein Net Connector leitet seinen Namen weiterhin ueber
+  `applyNetConnName()` vom Netz ab, auf dem er landet.
+- **Netzname am Segment:** steht auf dem laengsten waagrechten Element der
+  Leitung, nur bei rein senkrechten Leitungen gedreht (`renderWires()`).
+- **Leitungsstart:** `buildWirePath()` fuehrt das erste Teilstueck immer entlang
+  der Pinachse (`startDir`: senkrechter Pin = senkrecht zuerst), auch mit
+  Wegpunkten; alle weiteren Teilstuecke wie bisher waagrecht zuerst.
+- **Gruppen-Verschieben:** `onDragMove()` verschiebt zuerst Bauteile und
+  Junctions (`moveComp`/`moveJunc` routen angehaengte Leitungsenden neu) und
+  uebersetzt danach die Leitungen komplett aus ihren Startpunkten, ausser sie
+  haengen mit einem Ende an etwas, das stehen bleibt (dann bleibt dieses Ende
+  verankert). Unmarkierte Leitungen, die nur zwischen verschobenen Teilen
+  verlaufen, werden beim Start des Drags (`startDrag()`) mit aufgenommen.
+- **Info-Dialog:** Klick aufs Logo (`showAbout()`) zeigt Version, Git-Commit
+  und Build-Datum aus `window.APP_BUILD` (`js/version.js`). Lokal gilt der
+  Default "local build"; der Workflow `deploy-pages.yml` ueberschreibt die Datei
+  im Pages-Output (Schritt "Write build info": Release-Tag bzw. Branchname,
+  `github.sha`, Build-Datum). `version.js` wird vor allen anderen Skripten
+  geladen.
 
 ## Quellen (NGSpice / WASM)
 

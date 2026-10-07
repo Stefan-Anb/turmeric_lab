@@ -21,6 +21,15 @@ sondern verlinken/ergänzen.
    abarbeiten, nicht automatisch pflegen/umsortieren/abhaken. Nur anfassen,
    wenn der User explizit danach fragt.
 
+4. **Bei jedem neuen Feature (und jeder relevanten Verhaltensänderung bzw.
+   jedem gefundenen und behobenen Bug mit Lerneffekt) wird
+   [DOKUMENTATION.md](DOKUMENTATION.md) im selben Zug aktualisiert**: passendes
+   Kapitel ergänzen oder ein neues anlegen, bei Bedarf das Stand-Datum im Kopf
+   anpassen. Das gilt auch für Anpassungen in dieser Datei (z. B. neue
+   Skriptdateien in der Tabelle unten). Die Doku wird mit dem Feature fertig
+   gemeldet, nicht erst auf Nachfrage; ein Commit ist dafür weiterhin nicht
+   nötig (siehe Regel 1).
+
 ## Projektüberblick
 
 TurmericLab ist ein browserbasierter Schaltplaneditor mit SPICE-Netzliste und
@@ -30,12 +39,13 @@ npm-Dependencies** — alles läuft über klassische `<script>`-Tags direkt aus
 globalen Scope teilen):
 
 ```
-js/components.js → js/schematic.js → js/netlist.js → js/app.js → js/params.js → js/simulation.js
+js/version.js → js/components.js → js/schematic.js → js/netlist.js → js/app.js → js/params.js → js/simulation.js
   → js/power-analyzer-core.js → js/power-analyzer-ui.js → js/power-analyzer-sim.js
 ```
 
 | Datei | Rolle |
 |---|---|
+| `js/version.js` | Build-Info (`window.APP_BUILD`) für den Info-Dialog; lokal Default "local build", vom Pages-Workflow überschrieben |
 | `js/schematic.js` | Datenmodell `S`, reine Geometrie-/Netz-Logik, kein DOM |
 | `js/components.js` | Bauteilbibliothek `CD`, SVG-Zeichenhelfer, Mini-Markdown-Renderer |
 | `js/netlist.js` | SPICE-Netzlistengenerierung |
