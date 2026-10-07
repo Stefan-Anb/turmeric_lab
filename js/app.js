@@ -1346,6 +1346,14 @@ function startDrag(e,target){
       else if(s.type==='junction'){const j=S.junctions.find(jj=>jj.id===s.id); if(j) groupInitial.push({type:'junction',id:j.id,x:j.x,y:j.y});}
       else if(s.type==='wire'){const w=S.wires.find(ww=>ww.id===s.id); if(w){ groupInitial.push({type:'wire',id:w.id,points: w.points.map(p=>({x:p.x,y:p.y}))}); origWireSignatures.push({id:w.id,pts: JSON.stringify(w.points)});}}
     }
+    // Unselected wires running purely between moved parts (both ends on moved
+    // pins/junctions) must travel with the group too; otherwise both ends get
+    // re-routed independently and the wire is distorted.
+    for(const w of S.wires){
+      if(selIdsWire.has(w.id)||!w.from||!w.to)continue;
+      const endMoved=function(c){return c&&((c.type==='pin'&&selIdsComp.has(c.compId))||(c.type==='junction'&&selIdsJunc.has(c.id)));};
+      if(endMoved(w.from)&&endMoved(w.to))groupInitial.push({type:'wire',id:w.id,points:w.points.map(p=>({x:p.x,y:p.y}))});
+    }
     S.drag={active:true,target:{type:'group'},sm:pt,groupInitial:groupInitial,origWireSignatures:origWireSignatures,moved:false,lastDx:0,lastDy:0};
     return;
   }
@@ -1390,15 +1398,18 @@ function onDragMove(e){
       } else if(it.type==='junction'){
         const j=S.junctions.find(jj=>jj.id===it.id); if(!j) continue;
         const nx=it.x+dx, ny=it.y+dy; moveJunc(it.id,nx,ny);
-      } else if(it.type==='wire'){
-        const w=S.wires.find(ww=>ww.id===it.id); if(!w) continue;
-        // Skip translating wires whose endpoints are attached to moved components/junctions
-        const attachedFrom = w.from && ((w.from.type==='pin' && movedCompIds.has(w.from.compId)) || (w.from.type==='junction' && movedJuncIds.has(w.from.id)));
-        const attachedTo = w.to && ((w.to.type==='pin' && movedCompIds.has(w.to.compId)) || (w.to.type==='junction' && movedJuncIds.has(w.to.id)));
-        if(attachedFrom || attachedTo) continue;
-        // translate all points
-        w.points = it.points.map(p=>({x:p.x+dx,y:p.y+dy}));
       }
+    }
+    // Wires are translated in a second pass, after moveComp/moveJunc (which
+    // re-route attached wire ends). A wire moves as a whole unless one end is
+    // attached to something that stays put (unmoved pin/junction); that end
+    // must stay anchored, so those wires keep the end-only re-routing.
+    const fixedEnd=function(c){return c&&((c.type==='pin'&&!movedCompIds.has(c.compId))||(c.type==='junction'&&!movedJuncIds.has(c.id)));};
+    for(const it of S.drag.groupInitial){
+      if(it.type!=='wire')continue;
+      const w=S.wires.find(ww=>ww.id===it.id); if(!w) continue;
+      if(fixedEnd(w.from)||fixedEnd(w.to)) continue;
+      w.points = it.points.map(p=>({x:p.x+dx,y:p.y+dy}));
     }
     renderAll();
     return;
@@ -1631,7 +1642,7 @@ function onDragEnd(){
       }
     } else if(S.drag.target.type==='group'){
       // After a group move, cleanup nets for moved wires (unique)
-      const selWireIds = S.selected.filter(s=>s.type==='wire').map(s=>s.id);
+      const selWireIds = S.drag.groupInitial.filter(s=>s.type==='wire').map(s=>s.id);
       const uniq = Array.from(new Set(selWireIds));
       for(const wid of uniq){ const ww=S.wires.find(w=>w.id===wid); if(ww) cleanupNet(ww.id); }
       // Clean up and re-draw junctions

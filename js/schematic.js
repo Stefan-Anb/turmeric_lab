@@ -64,16 +64,24 @@ function simplifyPath(pts){
 
 function buildWirePath(waypoints,endPt){
   const start = S.wire.startPt;
-  if(!waypoints.length){
-    if(S.wire.startDir && start && !(start.x===endPt.x||start.y===endPt.y)){
-      if(S.wire.startDir==='v') return [start,{x:start.x,y:endPt.y},endPt];
-      return [start,{x:endPt.x,y:start.y},endPt];
+  // One orthogonal leg a->b. The very first leg leaves the start pin along the
+  // pin's own axis (startDir 'v' = vertical first), so a wire from a vertical
+  // pin never kinks sideways, with or without waypoints. All other legs use the
+  // default horizontal-first routing.
+  const leg=function(a,b,first){
+    if(first && S.wire.startDir && !(a.x===b.x||a.y===b.y)){
+      return S.wire.startDir==='v' ? [a,{x:a.x,y:b.y},b] : [a,{x:b.x,y:a.y},b];
     }
-    return ortho(start,endPt);
+    return ortho(a,b);
+  };
+  const targets=waypoints.concat([endPt]);
+  let pts=[];let prev=start;
+  for(let i=0;i<targets.length;i++){
+    const seg=leg(prev,targets[i],i===0);
+    if(pts.length)seg.shift();
+    pts.push(...seg);prev=targets[i];
   }
-  let pts=[];let prev=S.wire.startPt;
-  for(const wp of waypoints){const seg=ortho(prev,wp);if(pts.length)seg.shift();pts.push(...seg);prev=wp;}
-  const last=ortho(prev,endPt);if(pts.length)last.shift();pts.push(...last);return pts;
+  return pts;
 }
 
 // ===== Finders (pure, no DOM access) =====
