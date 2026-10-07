@@ -277,8 +277,14 @@ function renderComps(){
     if(isSelected)g.classList.add('selected');
     g.addEventListener('mousedown',(function(id){return function(e){onCompDown(e,id);};})(comp.id));
     // Probe mode: outline devices that support a power-dissipation probe.
-    g.addEventListener('mouseenter',(function(c){return function(){
-      if(S.mode==='probe'&&typeof supportsPowerProbe==='function'&&supportsPowerProbe(c)){this.classList.add('power-probe-hover');hint('Click: power probe P('+(c.label||c.type)+')');}
+    // The outline only shows while the body (not a pin) is under the cursor, so
+    // it is always clear which of the two a click will probe: near a pin the
+    // outline goes away and the current-probe marker takes over.
+    g.addEventListener('mousemove',(function(c){return function(e){
+      if(S.mode!=='probe'||typeof supportsPowerProbe!=='function'||!supportsPowerProbe(c)){this.classList.remove('power-probe-hover');return;}
+      var pt=svgPt(e),np=findPin(pt.x,pt.y,18);
+      if(np&&np.type==='pin'){this.classList.remove('power-probe-hover');return;}
+      if(!this.classList.contains('power-probe-hover')){this.classList.add('power-probe-hover');hint('Click: power probe P('+(c.label||c.type)+')');}
     };})(comp));
     g.addEventListener('mouseleave',function(){this.classList.remove('power-probe-hover');});
     lyrC.appendChild(g);
