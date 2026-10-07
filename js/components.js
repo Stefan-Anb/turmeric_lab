@@ -818,7 +818,7 @@ const CD={
       pulse_tperiod:{l:'Tperiod (s)',modes:['PULSE']},
       pulse_ncycles:{l:'Ncycles',modes:['PULSE']},
       // Behavioural
-      beh_eq:{l:'Equation',modes:['BEHAV']},
+      beh_eq:{l:'Equation',modes:['BEHAV'],eq:true},
       // Ramp: hold start value until TDelay, then linear to the end value over
       // Duration, then hold (netlist: PWL).
       ramp_start:{l:'Start (V)',modes:['RAMP']},

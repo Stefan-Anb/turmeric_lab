@@ -922,7 +922,8 @@ function generateNetlist(opts){
         line=dev+' '+net1+' '+net2+(acSpec?' '+acSpec:'')+' PULSE('+v1+' '+v2+' '+td+' '+tr+' '+tf+' '+pw+' '+per+' '+np+')';
       }else if(mode==='BEHAV'){
         var eq=c.beh_eq||'0';
-        line=dev+' '+net1+' '+net2+' cur = \''+eq+'\'';
+        // E (voltage) takes vol=, G (current) takes cur=; cur= on an E source hangs the engine.
+        line=dev+' '+net1+' '+net2+(dev.charAt(0)==='E'?' vol':' cur')+' = \''+eq+'\'';
       }
       lines.push(line);
       continue;

@@ -276,6 +276,11 @@ function renderComps(){
     }
     if(isSelected)g.classList.add('selected');
     g.addEventListener('mousedown',(function(id){return function(e){onCompDown(e,id);};})(comp.id));
+    // Probe mode: outline devices that support a power-dissipation probe.
+    g.addEventListener('mouseenter',(function(c){return function(){
+      if(S.mode==='probe'&&typeof supportsPowerProbe==='function'&&supportsPowerProbe(c)){this.classList.add('power-probe-hover');hint('Click: power probe P('+(c.label||c.type)+')');}
+    };})(comp));
+    g.addEventListener('mouseleave',function(){this.classList.remove('power-probe-hover');});
     lyrC.appendChild(g);
   }
 }
@@ -499,9 +504,16 @@ function renderProps(){
     }
   }
   pc.innerHTML=html;
+  eqTarget=null;   // a fresh panel: forget the previously focused equation field
   // attach live listeners: text inputs
   pc.querySelectorAll('.prop-input').forEach(function(inp){
     var key=inp.getAttribute('data-key');
+    // Equation fields (def.props[key].eq) can take probed signals while probe
+    // mode is active, see insertIntoEquationField().
+    if(def.props[key]&&def.props[key].eq){
+      inp.addEventListener('focus',function(){eqTarget={el:inp,compId:comp.id,selStart:null,selEnd:null};});
+      inp.addEventListener('blur',function(){if(eqTarget&&eqTarget.el===inp){eqTarget.selStart=inp.selectionStart;eqTarget.selEnd=inp.selectionEnd;}});
+    }
     inp.addEventListener('input',function(){
       comp[key]=inp.value;
       if(comp.type==='netconn')applyNetConnName(comp);
@@ -539,6 +551,28 @@ function renderProps(){
     });
   });
 }
+// The equation field of the selected component that was last focused (if any).
+var eqTarget=null;
+
+// Probe mode + a focused/last-focused equation field: the probed signal is
+// typed into that field (at the caret) instead of being added to the plot.
+// Returns true when the text was inserted (the caller then skips its normal
+// probe handling).
+function insertIntoEquationField(text){
+  var t=eqTarget;
+  if(!t||!t.el||!t.el.isConnected)return false;
+  if(S.selected.length!==1||S.selected[0].id!==t.compId)return false;
+  var el=t.el,v=el.value;
+  var a,b;
+  if(document.activeElement===el){a=el.selectionStart;b=el.selectionEnd;}
+  else{a=(t.selStart==null)?v.length:t.selStart;b=(t.selEnd==null)?a:t.selEnd;}
+  el.value=v.slice(0,a)+text+v.slice(b);
+  var pos=a+text.length;
+  el.focus();el.setSelectionRange(pos,pos);
+  t.selStart=t.selEnd=pos;
+  el.dispatchEvent(new Event('input',{bubbles:true}));
+  return true;
+}
 function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
 
 // ═══ MODE ═══
@@ -554,7 +588,7 @@ function setMode(m){
   svg.style.cursor=m==='wire'||m==='place'?'crosshair':(m==='probe'?'crosshair':'default');
   if(m!=='place')document.querySelectorAll('.comp-btn').forEach(function(b){b.classList.remove('selected');});
   hint(m==='wire'?'Click to start wire \u2014 click again or pin to finish':m==='place'?'Click to place':
-    m==='probe'?'Click to probe net or pin \u2014 drag to probe two points':m==='select'?'Click to select \u00b7 drag to move \u00b7 hover pin to start wire':'Click to select \u00b7 drag to move \u00b7 hover pin to start wire');
+    m==='probe'?(eqTarget&&eqTarget.el&&eqTarget.el.isConnected?'Click a net or pin to insert its signal into the equation, drag for v(a,b)':'Click to probe net or pin \u2014 drag to probe two points'):m==='select'?'Click to select \u00b7 drag to move \u00b7 hover pin to start wire':'Click to select \u00b7 drag to move \u00b7 hover pin to start wire');
 }
 
 function selectComp(type,ev){
@@ -1077,6 +1111,17 @@ function onCanvasDown(e){
 function onCompDown(e,compId){
   if(e.button!==0)return;e.stopPropagation();
   if(S.mode==='wire'){handleWireClick(svgPt(e));return;}
+  // Probe mode: a click on the body of a simple device probes its power loss.
+  if(S.mode==='probe'){
+    // Pins win over the body: anything within pin reach (the same radius the
+    // net/current probe uses elsewhere, wider than the pin ring) probes the pin.
+    var nearPin=findPin(svgPt(e).x,svgPt(e).y,18);
+    if(nearPin&&nearPin.type==='pin'){toggleProbeAt(nearPin.x,nearPin.y);return;}
+    // An alternative probe target (equation field, measurement dialog) owns the clicks.
+    if((eqTarget&&eqTarget.el&&eqTarget.el.isConnected)||(typeof simMeasureDraft!=='undefined'&&simMeasureDraft)){hint('Probe a net or pin: the equation/measurement field is receiving the signal');return;}
+    if(!togglePowerProbe(compId))hint('No power probe for this part (only simple devices and transistors)');
+    return;
+  }
   if(S.mode==='select'){
     if(!S.selected.some(function(s){return s.type==='comp'&&s.id===compId;})){clearSel();S.selected=[{type:'comp',id:compId}];renderAll();renderProps();}
     startDrag(e,{type:'comp',id:compId});

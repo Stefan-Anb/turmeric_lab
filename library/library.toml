@@ -17,7 +17,7 @@
 
 [library]
 name = "TurmericLab Schematic Library"
-version = "1.3.0"   # Version der gesamten Bibliothek, bei jeder Aenderung erhoehen
+version = "1.4.0"   # Version der gesamten Bibliothek, bei jeder Aenderung erhoehen
 
 [[schematic]]
 file = "rc_lowpass.svg"           # Dateiname relativ zu library/
@@ -34,8 +34,8 @@ version = "1.0.0"
 [[schematic]]
 file = "current_source.svg"
 name = "Current Source Examples"
-description = "Independent current source into a resistor: DC (1 mA into 1k = 1 V), pulse into 1k || 100n (RC charging, tau = 100 us) and ramp. Transient analysis preset with voltage and current probes."
-version = "1.0.0"
+description = "Independent current source into a resistor: DC (1 mA into 1k = 1 V), pulse into 1k || 100n (RC charging, tau = 100 us), ramp, and a behavioural current source whose equation sums the three source currents from the named nets. Transient analysis preset with voltage and current probes."
+version = "1.1.0"
 
 [[schematic]]
 file = "param_load_sweep.svg"

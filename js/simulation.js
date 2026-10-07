@@ -535,6 +535,51 @@ function onAnalysisTypeChange(sel){
 // Assemble the full deck: generated devices + analysis card + user directives + .end.
 // `paramValues` ({name -> value string}) pins the swept parameters for one run
 // of a parameter sweep.
+// Nodes that have no DC path to ground. Capacitors and current sources are
+// open circuits at DC, so a node fed only through those (e.g. a thermal RC
+// ladder driven by a current source) makes the operating-point matrix singular:
+// ngspice then falls back to a bogus start state. Works on the generated
+// netlist text; elements are over-connected on purpose (all their nodes count
+// as joined), so it errs towards "has a path" and never flags a false positive
+// for multi-terminal parts. Subcircuit bodies are skipped.
+function findFloatingDcNodes(core){
+  var parent={};
+  function find(a){while(parent[a]!==a){parent[a]=parent[parent[a]];a=parent[a];}return a;}
+  function add(a){if(!(a in parent))parent[a]=a;}
+  function join(a,b){add(a);add(b);parent[find(a)]=find(b);}
+  function norm(n){n=n.toLowerCase();return n==='gnd'?'0':n;}
+  add('0');
+  var nodesSeen={},depth=0;
+  var nCount={r:2,l:2,v:2,d:2,b:2,s:2,w:2,e:4,g:4,h:2,f:2,q:4,j:3,m:4,z:3,t:4};
+  core.split('\n').forEach(function(line){
+    var t=line.trim();
+    if(!t||t[0]==='*'||t[0]==='+')return;
+    if(t[0]==='.'){
+      if(/^\.subckt\b/i.test(t))depth++;
+      else if(/^\.ends\b/i.test(t))depth=Math.max(0,depth-1);
+      return;
+    }
+    if(depth)return;
+    var tok=t.split(/\s+/),kind=tok[0][0].toLowerCase();
+    var nodes;
+    if(kind==='c'||kind==='i'){
+      nodes=tok.slice(1,3).map(norm);
+      nodes.forEach(function(n){add(n);nodesSeen[n]=true;});
+      return;
+    }
+    if(kind==='x')nodes=tok.slice(1,-1).filter(function(s){return s.indexOf('=')<0&&s.toLowerCase()!=='params:';});
+    else if(nCount[kind])nodes=tok.slice(1,1+nCount[kind]);
+    else return;
+    nodes=nodes.map(norm);
+    nodes.forEach(function(n){nodesSeen[n]=true;});
+    for(var i=1;i<nodes.length;i++)join(nodes[0],nodes[i]);
+    if(nodes.length===1)add(nodes[0]);
+  });
+  var root=find('0'),out=[];
+  for(var n in nodesSeen)if(n in parent&&find(n)!==root)out.push(n);
+  return out;
+}
+
 function buildFullNetlist(paramValues){
   var core=generateNetlist(paramValues?{paramValues:paramValues}:null);
   var dirEl=document.getElementById('sim-directives');
@@ -546,6 +591,16 @@ function buildFullNetlist(paramValues){
   var analysis=buildAnalysisDirective();
   var isAc=/^\s*\.ac\b/im.test(analysis+'\n'+directives);
   if(needsCurrents())lines.push(buildSaveLine(isAc));
+  // Without a DC path to ground there is no operating point. For a transient
+  // run start from zero initial conditions (UIC) instead of letting ngspice
+  // fall back to a meaningless "Transient op" state.
+  if(/^\s*\.tran\b/i.test(analysis)&&!/\buic\b/i.test(analysis)){
+    var floating=findFloatingDcNodes(core);
+    if(floating.length){
+      analysis+=' uic';
+      simLog('Note: no DC path to ground for node(s) '+floating.join(', ')+' (only capacitors/current sources). Starting the transient with UIC (all initial conditions 0).');
+    }
+  }
   if(analysis)lines.push(analysis);
   var options=buildOptionsDirective();
   if(options)lines.push(options);
@@ -658,6 +713,7 @@ function runSimulation(){
   }
   setRunButtonState('running');
   var logEl=document.getElementById('sim-log');if(logEl)logEl.textContent='';
+  refreshPowerFormulas();
   if(!simViewActive)setSimView(true);
   showSimPlotPlaceholder('Simulating…');
   var token=++simRunToken;
@@ -1008,8 +1064,107 @@ function formulaAliases(map){
       var key=findVectorKey(map,cv.cands[k]);
       if(key){al['i('+ref.toLowerCase()+')']=key;break;}
     }
+    // Per-terminal aliases I(dev.pin) for the terminals whose vector already
+    // is the current INTO the pin (no sign flip), e.g. I(QQ1.C) / I(MM1.D).
+    var def=CD[c.type];
+    for(var pi=0;def&&pi<def.pins.length;pi++){
+      var pcv=currentVectorsForPin(c,pi);
+      if(!pcv||pcv.sign!==1)continue;
+      for(var pk=0;pk<pcv.cands.length;pk++){
+        var pkey=findVectorKey(map,pcv.cands[pk]);
+        if(pkey){al['i('+pcv.dev.toLowerCase()+'.'+String(pcv.pin).toLowerCase()+')']=pkey;break;}
+      }
+    }
   }
   return al;
+}
+
+// ═══ POWER-DISSIPATION PROBE ═══
+// Clicking a simple device in probe mode adds a formula P(ref) = instantaneous
+// power dissipated in it: Vab*I for two-terminal parts, Vce*Ic+Vbe*Ib for BJTs,
+// Vds*Id for MOSFETs. Sources, ICs/subcircuits and the ideal reactive parts
+// (C, L, transformer: they store, not dissipate) have no such probe.
+var POWER_PROBE_TYPES={
+  resistor:'two',diode:'two',led:'two',zener:'two',sw:'two',
+  npn:'bjt',pnp:'bjt',nmos:'mos',pmos:'mos'
+};
+
+function supportsPowerProbe(comp){
+  return !!(comp&&POWER_PROBE_TYPES[comp.type]&&buildSpiceRefMap()[comp.id]);
+}
+
+// "V(a)-V(b)" between two pin indices with ground (node 0) left out; null when
+// both sides are ground / unresolved.
+function pinVoltageExpr(comp,ia,ib){
+  function net(i){
+    var pos=compPinPos(comp,i),n=_probeNet(pos.x,pos.y);
+    return (n&&n!=='0')?n:null;
+  }
+  var a=net(ia),b=net(ib);
+  if(a&&b)return a===b?null:'(V('+a+')-V('+b+'))';
+  if(a)return 'V('+a+')';
+  if(b)return '(-V('+b+'))';
+  return null;
+}
+
+function powerFormulaExpr(comp){
+  var kind=POWER_PROBE_TYPES[comp.type],ref=buildSpiceRefMap()[comp.id];
+  if(!kind||!ref)return null;
+  var terms=[],v;
+  if(kind==='two'){
+    v=pinVoltageExpr(comp,0,1);
+    if(v)terms.push(v+'*I('+ref+')');
+  }else if(kind==='bjt'){            // pins B, C, E
+    v=pinVoltageExpr(comp,1,2);if(v)terms.push(v+'*I('+ref+'.C)');
+    v=pinVoltageExpr(comp,0,2);if(v)terms.push(v+'*I('+ref+'.B)');
+  }else{                             // MOSFET, pins G, D, S
+    v=pinVoltageExpr(comp,1,2);if(v)terms.push(v+'*I('+ref+'.D)');
+  }
+  return terms.length?terms.join('+'):null;
+}
+
+// The stored expression names nets as they were numbered when the probe was
+// set; unnamed nets get renumbered when the schematic changes. So every run
+// re-derives the expression of each power probe from its device (and drops the
+// probe when the device is gone or no longer supports one).
+function refreshPowerFormulas(){
+  var changed=false;
+  for(var i=simFormulas.length-1;i>=0;i--){
+    var f=simFormulas[i];
+    if(!f.powerOf)continue;
+    var comp=S.components.find(function(c){return c.id===f.powerOf;});
+    var expr=supportsPowerProbe(comp)?powerFormulaExpr(comp):null;
+    if(!expr){
+      simLog('Power probe '+(f.name||'')+' removed: device gone or both terminals on ground.');
+      simFormulas.splice(i,1);changed=true;continue;
+    }
+    var nm='P('+(comp.label||comp.type)+')';
+    if(f.expr!==expr||f.name!==nm){f.expr=expr;f.name=nm;f.error=null;changed=true;}
+  }
+  if(changed){saveSimSettings();renderFormulaList();}
+}
+
+// Toggle P(ref) for a device. Returns true when the click was a power probe.
+function togglePowerProbe(compId){
+  var comp=S.components.find(function(c){return c.id===compId;});
+  if(!supportsPowerProbe(comp))return false;
+  var name='P('+(comp.label||comp.type)+')';
+  var idx=-1;
+  for(var i=0;i<simFormulas.length;i++)if(simFormulas[i].powerOf===comp.id){idx=i;break;}
+  if(idx>=0){
+    simFormulas.splice(idx,1);
+    hint('Probe removed: '+name);
+  }else{
+    var expr=powerFormulaExpr(comp);
+    if(!expr){hint('No power probe: both terminals of '+(comp.label||comp.type)+' are on ground');return true;}
+    dropAutoSelection();
+    simFormulas.push({name:name,expr:expr,on:true,powerOf:comp.id});
+    hint('Power probe added: '+name+' = '+expr);
+  }
+  saveSimSettings();
+  renderFormulaList();
+  if(simLastResult)plotResult(simLastResult);
+  return true;
 }
 
 function escRe(s){return s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}
@@ -1111,6 +1266,7 @@ function renderFormulaList(){
     var idx=parseInt(inp.getAttribute('data-fi'),10),key=inp.getAttribute('data-fk');
     inp.addEventListener('change',function(){
       simFormulas[idx][key]=(inp.type==='checkbox')?inp.checked:inp.value;
+      if(key==='expr')delete simFormulas[idx].powerOf;   // hand-edited: no longer auto-derived
       simFormulas[idx].error=null;
       saveSimSettings();
       if(simLastResult)plotResult(simLastResult);
@@ -1615,19 +1771,7 @@ function feedProbeToMeasureModal(pr){
     return;
   }
   var p=path.split('.');
-  // The signal this field held before was (most likely) put on the plot by an
-  // earlier probe click — replacing it should take it off again instead of
-  // leaving a stale curve behind. Skipped when another field of the same
-  // measurement still uses it.
-  var oldVec=d[p[0]][p[1]];
-  if(oldVec&&String(oldVec).toLowerCase()!==vec.toLowerCase()){
-    var stillUsed=fields.some(function(f){
-      if(f===path)return false;
-      var q=f.split('.');
-      return String(d[q[0]][q[1]]||'').toLowerCase()===String(oldVec).toLowerCase();
-    });
-    if(!stillUsed)removeProbeForVector(oldVec);
-  }
+  // Probing into this dialog never touches the plot probes (see probeIntoMeasurement).
   d[p[0]][p[1]]=vec;
   // Advance to the next signal field of this kind (trig -> targ, expr -> when-
   // signal), so a second probe click fills the next slot without having to
@@ -2615,11 +2759,68 @@ function currentProbeTargetAt(x,y){
   return {compId:comp.id,pinIdx:near.pinIdx,cv:cv,x:near.x,y:near.y};
 }
 
+// ── Probing into a behavioural-source equation ──
+// While an equation field is the insertion target (see eqTarget in app.js) a
+// probe click types the signal into it instead of adding a plot probe. The text
+// is what ngspice's B-source syntax accepts: v(net), v(a,b), i(vsource).
+function eqNetHint(net){
+  return /^n\d{3}$/.test(net)?' (unnamed net: give it a name to keep the equation stable when you edit the schematic)':'';
+}
+function probeIntoEquation(x,y){
+  if(typeof eqTarget==='undefined'||!eqTarget||!eqTarget.el||!eqTarget.el.isConnected)return false;
+  var tgt=currentProbeTargetAt(x,y),txt=null;
+  if(tgt){
+    var cand=null;
+    for(var i=0;i<tgt.cv.cands.length;i++)if(/^i\(v/i.test(tgt.cv.cands[i])){cand=tgt.cv.cands[i].toLowerCase();break;}
+    if(!cand){hint('A behavioural equation can only use currents of voltage sources, i(v...). Put a 0 V source in series to measure this current.');return true;}
+    txt=(tgt.cv.sign<0?'-':'')+cand;
+  }else{
+    var net=_probeNet(x,y);
+    if(!net){hint('No net to probe here');return true;}
+    if(net==='0'){hint('Ground is 0 in an equation');txt='0';}
+    else txt='v('+net+')';
+    if(net!=='0')hint('Inserted '+txt+eqNetHint(net));
+  }
+  insertIntoEquationField(txt);
+  return true;
+}
+// The measurement dialog is another alternative probe sink: while it is open a
+// probe click only fills its signal field and leaves the plot probes alone.
+function probeIntoMeasurement(x,y){
+  if(typeof simMeasureDraft==='undefined'||!simMeasureDraft)return false;
+  var tgt=currentProbeTargetAt(x,y);
+  if(tgt){feedProbeToMeasureModal({kind:'I',compId:tgt.compId,pinIdx:tgt.pinIdx});return true;}
+  var net=_probeNet(x,y);
+  if(net==='0'){hint('Ground (node 0) is not a measurable signal');return true;}
+  if(!net){hint('No net to probe here');return true;}
+  feedProbeToMeasureModal({kind:'V',net:net});
+  return true;
+}
+function probeDiffIntoMeasurement(a,b){
+  if(typeof simMeasureDraft==='undefined'||!simMeasureDraft)return false;
+  var aOk=a&&a!=='0',bOk=b&&b!=='0';
+  if(!aOk&&!bOk){hint('No nets to probe');return true;}
+  if(!aOk||!bOk||a===b)feedProbeToMeasureModal({kind:'V',net:aOk?a:b});
+  else feedProbeToMeasureModal({kind:'Vd',p:a,n:b});
+  return true;
+}
+function probeDiffIntoEquation(a,b){
+  if(typeof eqTarget==='undefined'||!eqTarget||!eqTarget.el||!eqTarget.el.isConnected)return false;
+  var aOk=a&&a!=='0',bOk=b&&b!=='0';
+  if(!aOk&&!bOk){hint('No nets to probe');return true;}
+  var txt=(aOk&&bOk)?(a===b?'0':'v('+a+','+b+')'):(aOk?'v('+a+')':'-v('+b+')');
+  insertIntoEquationField(txt);
+  hint('Inserted '+txt+eqNetHint(aOk?a:b));
+  return true;
+}
+
 // Single click: on a device pin this toggles a CURRENT probe I(dev.pin);
 // anywhere else on a net it toggles the node voltage probe V(net).
 function toggleProbeAt(x,y){
   // The power analyzer is assigning a channel: the click is its, not the plot's.
   if(typeof paHandleProbeClick==='function'&&paHandleProbeClick(x,y))return;
+  if(probeIntoEquation(x,y))return;
+  if(probeIntoMeasurement(x,y))return;
   if(!S.probes)S.probes=[];
   var tgt=currentProbeTargetAt(x,y);
   if(tgt){
@@ -2674,6 +2875,8 @@ function addDiffProbe(x1,y1,x2,y2){
   if(typeof paHandleProbeDrag==='function'&&paHandleProbeDrag(x1,y1,x2,y2))return;
   var a=_probeNet(x1,y1); // measured (minuend) - drag START
   var b=_probeNet(x2,y2); // reference (subtrahend) - drag END
+  if(probeDiffIntoEquation(a,b))return;
+  if(probeDiffIntoMeasurement(a,b))return;
   var aOk=a&&a!=='0', bOk=b&&b!=='0';
   if(!S.probes)S.probes=[];
   if(!aOk&&!bOk){hint('No nets to probe');return;}
