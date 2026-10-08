@@ -30,3 +30,5 @@ Copy&Paste Daten in echte Zwischenablage übernehmen?
 
 Schriftgröße Markdown bei SVG-"Export"
 Allgemein SVG-Export checken - Viewport i.O.?
+
+Custom components im/export - globale Library

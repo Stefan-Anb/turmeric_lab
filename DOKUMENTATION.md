@@ -1181,6 +1181,20 @@ Autosave und Dateiwechsel.
 - Download einer **nicht** aktuellen internen Datei: `downloadInternalFile()`
   tauscht den Zustand kurz ein, exportiert (die Zeichnung kommt aus dem
   Live-Canvas) und stellt Editor-Zustand, Undo-Stack und View danach wieder her.
+- **Note-Text im Export:** Das Export-Stylesheet in `exportSVG()` spiegelt die
+  `.note-text`-Regeln aus `styles.css` (Schrift, 13px, h1/h2/h3 = 17/15/13px,
+  Listen, Tabellen, Code) in Schwarz. Frueher stand dort nur `color`, sodass
+  Ueberschriften im Export auf Browser-Standardgroessen zurueckfielen. Aendert
+  sich `.note-text` in `styles.css`, muss der Export-Block mitgezogen werden.
+- **Akzentfarbe im Export:** Net-Connector (`netconn`) und Versorgungs-Rail-Text
+  setzen `#00c8ff` als Inline-Style auf dem `<text>`, was das Export-Stylesheet
+  uebersticht. `exportSVG()` setzt solche Texte daher explizit auf Schwarz.
+  Neue Bauteile sollten Farben per CSS-Klasse statt Inline-Style setzen.
+- **SVG-Exportgroesse:** `exportSVG()` setzt `viewBox` auf die Inhaltsgrenzen
+  (Bauteil-BBoxen + Wire-Punkte, 40 px Rand) und `width`/`height` auf dieselbe
+  Groesse (1 Einheit = 1 px, Originalgroesse). Das weisse Hintergrund-Rechteck
+  deckt exakt diese viewBox ab. Frueher wurde die Pan/Zoom-viewBox des Canvas
+  uebernommen (Bild beim Wiedereinfuegen zu klein, Hintergrund falsch gross).
 
 **Global (Projekt).** `library/library.toml` beschreibt die Vorlagen,
 die SVGs liegen daneben in `library/`. Format:

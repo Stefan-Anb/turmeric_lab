@@ -2398,12 +2398,37 @@ function exportSVG(opts){
     if(c)vis.style.stroke=c;
     if(wd)vis.style.strokeWidth=wd.exportPx;
   });
+  // Net flags and supply-rail texts carry the accent colour as an inline
+  // style (beats the export stylesheet), so force those to black for print.
+  clone.querySelectorAll('text').forEach(function(t){
+    if((t.style.fill||'').replace(/\s/g,'').toLowerCase()==='#00c8ff'||t.style.fill==='rgb(0, 200, 255)')t.style.fill='#000';
+  });
   // remove grid and defs so exported SVG is clean for printing
   var gb=clone.querySelector('#grid-bg'); if(gb) gb.remove();
   var defs=clone.querySelector('defs'); if(defs) defs.remove();
   // insert a white background rect for print
+  // Export area = content bounds + small margin, at 1 user unit = 1 px (the
+  // live canvas' pan/zoom viewBox and 100% sizing would give a tiny, oddly
+  // cropped image when the SVG is re-inserted as a picture).
+  var bx0=Infinity,by0=Infinity,bx1=-Infinity,by1=-Infinity;
+  S.components.forEach(function(c){
+    var cb=compBBox(c);
+    if(cb.left<bx0)bx0=cb.left;if(cb.top<by0)by0=cb.top;
+    if(cb.right>bx1)bx1=cb.right;if(cb.bottom>by1)by1=cb.bottom;
+  });
+  S.wires.forEach(function(w){w.points.forEach(function(p){
+    if(p.x<bx0)bx0=p.x;if(p.y<by0)by0=p.y;
+    if(p.x>bx1)bx1=p.x;if(p.y>by1)by1=p.y;
+  });});
+  if(bx0===Infinity){bx0=0;by0=0;bx1=GRID*10;by1=GRID*10;}
+  var EXPORT_PAD=40;
+  bx0-=EXPORT_PAD;by0-=EXPORT_PAD;bx1+=EXPORT_PAD;by1+=EXPORT_PAD;
+  var bw=bx1-bx0,bh=by1-by0;
+  clone.setAttribute('viewBox',bx0+' '+by0+' '+bw+' '+bh);
+  clone.setAttribute('width',bw);clone.setAttribute('height',bh);
+  clone.removeAttribute('style');
   var bgRect=document.createElementNS('http://www.w3.org/2000/svg','rect');
-  bgRect.setAttribute('x','0');bgRect.setAttribute('y','0');bgRect.setAttribute('width','100%');bgRect.setAttribute('height','100%');bgRect.setAttribute('fill','#ffffff');
+  bgRect.setAttribute('x',bx0);bgRect.setAttribute('y',by0);bgRect.setAttribute('width',bw);bgRect.setAttribute('height',bh);bgRect.setAttribute('fill','#ffffff');
   clone.insertBefore(bgRect,clone.firstChild);
   // Insert print-oriented B/W styles with thicker strokes
   var st=document.createElementNS('http://www.w3.org/2000/svg','style');
@@ -2415,7 +2440,7 @@ function exportSVG(opts){
   // or they render as opaque black boxes in the export (hiding the embedded
   // image entirely, and turning the blanket into a black block instead of a
   // dashed outline).
-  st.textContent='.wire-vis{stroke:#000;stroke-width:2.5;fill:none;stroke-linecap:square}.comp-body{stroke:#000;stroke-width:2;fill:#ffffff}.comp-pin{stroke:#000;stroke-width:2;fill:none}.comp-label{fill:#000;font-family:monospace;font-size:18px}.comp-value{fill:#000;font-family:monospace;font-size:16px}.pin-dot{fill:#000}.junction-vis{fill:#000;stroke:#000;stroke-width:1} text{fill:#000}.blanket-frame{fill:none;stroke:#000;stroke-width:1.5;stroke-dasharray:6 4}.blanket-title{fill:#000;font-family:monospace;font-size:16px}.image-frame{fill:none;stroke:#000;stroke-width:1}.note-body{fill:#ffffff;stroke:#000;stroke-width:1.5}.note-text{color:#000}';
+  st.textContent='.wire-vis{stroke:#000;stroke-width:2.5;fill:none;stroke-linecap:square}.comp-body{stroke:#000;stroke-width:2;fill:#ffffff}.comp-pin{stroke:#000;stroke-width:2;fill:none}.comp-label{fill:#000;font-family:monospace;font-size:18px}.comp-value{fill:#000;font-family:monospace;font-size:16px}.pin-dot{fill:#000}.junction-vis{fill:#000;stroke:#000;stroke-width:1} text{fill:#000}.blanket-frame{fill:none;stroke:#000;stroke-width:1.5;stroke-dasharray:6 4}.blanket-title{fill:#000;font-family:monospace;font-size:16px}.image-frame{fill:none;stroke:#000;stroke-width:1}.note-body{fill:#ffffff;stroke:#000;stroke-width:1.5}.note-text{font-family:"Share Tech Mono",monospace;font-size:13px;color:#000;white-space:pre-wrap;overflow:hidden;line-height:1.4}.note-text h1,.note-text h2,.note-text h3{font-family:Rajdhani,sans-serif;color:#000;line-height:1.25;margin:2px 0}.note-text h1{font-size:17px}.note-text h2{font-size:15px}.note-text h3{font-size:13px}.note-text ul,.note-text ol{margin:2px 0;padding-left:20px}.note-text table{border-collapse:separate;border-spacing:0;margin:3px 1px;max-width:calc(100% - 2px);border-left:1px solid #000;border-top:1px solid #000}.note-text th,.note-text td{border-right:1px solid #000;border-bottom:1px solid #000;padding:1px 6px;overflow-wrap:anywhere}.note-text th,.note-text strong{color:#000}.note-text code{background:#0000001a;padding:0 3px;border-radius:2px;color:#000}.note-text del{opacity:.6}';
   clone.insertBefore(st,bgRect.nextSibling);
   // Embed schematic state for round-trip import
   var desc=document.createElementNS('http://www.w3.org/2000/svg','desc');
