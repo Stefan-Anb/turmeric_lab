@@ -1488,6 +1488,18 @@ die Standard-Totzeit des PWM-Generators ist 200n.
   haengen mit einem Ende an etwas, das stehen bleibt (dann bleibt dieses Ende
   verankert). Unmarkierte Leitungen, die nur zwischen verschobenen Teilen
   verlaufen, werden beim Start des Drags (`startDrag()`) mit aufgenommen.
+- **Drehen/Spiegeln ohne Kurzschluss (Bugfix 2026-10-08):** Bei 2-Pol-Bauteilen
+  vertauscht eine 180°-Drehung (oder Spiegelung) die Pinplaetze. `rerouteEnd`
+  zog den Draht dann gerade ueber das eigene Bauteil und den anderen Pin.
+  `cleanupNet` teilt Draehte an jedem Pin und hinterliess ein Drahtstueck
+  zwischen beiden Pins, die Quelle war kurzgeschlossen
+  (`Fatal error: instance vsrc1 is a shorted VSRC`, Netzliste `VSRC1 0 0`),
+  obwohl der Schaltplan gut aussah. `rewireComp` ruft jetzt `reroutePinEnd()`
+  (schematic.js): erst die andere L-Form, dann ein Umweg (Pin nach aussen,
+  seitlich vorbei), sobald der Weg Mittelpunkt oder einen anderen Pin des
+  eigenen Bauteils schneidet (`pathCrossesOwnComp`). Pin-zu-Pin-Draehte am
+  selben Bauteil bleiben unberuehrt. Schon kaputte Dateien repariert das nicht:
+  der Draht zwischen den Pins muss von Hand geloescht werden.
 - **Info-Dialog:** Klick aufs Logo (`showAbout()`) zeigt Version, Git-Commit
   und Build-Datum aus `window.APP_BUILD` (`js/version.js`). Lokal gilt der
   Default "local build"; der Workflow `deploy-pages.yml` ueberschreibt die Datei

@@ -205,6 +205,56 @@ function rerouteEnd(w,end,nx,ny){
   else {var body=w.points.slice(0,-1);w.points=simplifyPath(body.concat(ortho(body[body.length-1],{x:nx,y:ny}).slice(1)));}
 }
 
+// Rotate/mirror can move a pin to the far side of the part (180° swaps the two
+// pins of a 2-pin part). rerouteEnd then draws the wire straight across the
+// part and over the other pin; cleanupNet later splits wires at every pin and
+// leaves a wire segment between both pins = the part is shorted. So the
+// rerouted end must not cross its own part: try the other L-shape first, and
+// if the target lies right behind the part, route around it.
+function pathCrossesOwnComp(pts,comp,def,pinIdx){
+  var probes=[{x:comp.x,y:comp.y}];
+  for(var k=0;k<def.pins.length;k++){
+    if(k===pinIdx)continue;
+    var tp=xfPin(def.pins[k].x,def.pins[k].y,comp.rot||0,comp.mirror||false);
+    probes.push({x:comp.x+tp.x,y:comp.y+tp.y});
+  }
+  for(var si=0;si<pts.length-1;si++){
+    for(var pi=0;pi<probes.length;pi++){
+      if(pointOnSeg(probes[pi],pts[si],pts[si+1]))return true;
+    }
+  }
+  return false;
+}
+function reroutePinEnd(w,end,comp,def,pinIdx,nx,ny){
+  var orig=w.points.map(function(p){return{x:p.x,y:p.y};});
+  rerouteEnd(w,end,nx,ny);
+  if(orig.length<2)return;
+  if(w.from&&w.from.type==='pin'&&w.from.compId===comp.id&&w.to&&w.to.type==='pin'&&w.to.compId===comp.id)return; // deliberate pin-to-pin wire
+  if(!pathCrossesOwnComp(w.points,comp,def,pinIdx))return;
+  var P={x:nx,y:ny};
+  var t=end==='from'?orig[1]:orig[orig.length-2];
+  var rest=end==='from'?orig.slice(2):orig.slice(0,-2); // wire beyond t
+  var build=function(mid){ // mid: points between P and t
+    return end==='from'?simplifyPath([P].concat(mid,[t],rest)):simplifyPath(rest.concat([t],mid.slice().reverse(),[P]));
+  };
+  // 1) the other L-shape
+  var alts=[[{x:t.x,y:P.y}],[{x:P.x,y:t.y}]];
+  for(var ai=0;ai<alts.length;ai++){
+    var cand=build(alts[ai]);
+    if(!pathCrossesOwnComp(cand,comp,def,pinIdx)){w.points=cand;return;}
+  }
+  // 2) leave the pin outward, sidestep, pass the part, then on to t.
+  //    Opposite pins sidestep to opposite sides.
+  var dx=nx-comp.x,dy=ny-comp.y,d;
+  if(Math.abs(dx)>=Math.abs(dy)&&dx!==0)d={x:dx>0?1:-1,y:0};
+  else d={x:0,y:dy>=0?1:-1};
+  var perp={x:-d.y,y:d.x};
+  var S1={x:nx+d.x*GRID,y:ny+d.y*GRID};
+  var S2={x:S1.x+perp.x*2*GRID,y:S1.y+perp.y*2*GRID};
+  var mid=d.x===0?{x:S2.x,y:t.y}:{x:t.x,y:S2.y};
+  w.points=build([S1,S2,mid]);
+}
+
 function rewireComp(comp,def,oldRot,oldMir){
   for(var pi=0;pi<def.pins.length;pi++){
     var oldP=xfPin(def.pins[pi].x,def.pins[pi].y,oldRot,oldMir);
@@ -214,8 +264,8 @@ function rewireComp(comp,def,oldRot,oldMir){
     if(oldX===newX&&oldY===newY)continue;
     for(var wi=0;wi<S.wires.length;wi++){
       var w=S.wires[wi];
-      if(w.from&&w.from.type==='pin'&&w.from.compId===comp.id&&w.from.pinIdx===pi)rerouteEnd(w,'from',newX,newY);
-      if(w.to&&w.to.type==='pin'&&w.to.compId===comp.id&&w.to.pinIdx===pi)rerouteEnd(w,'to',newX,newY);
+      if(w.from&&w.from.type==='pin'&&w.from.compId===comp.id&&w.from.pinIdx===pi)reroutePinEnd(w,'from',comp,def,pi,newX,newY);
+      if(w.to&&w.to.type==='pin'&&w.to.compId===comp.id&&w.to.pinIdx===pi)reroutePinEnd(w,'to',comp,def,pi,newX,newY);
     }
     var j=juncAt(oldX,oldY);if(j){j.x=newX;j.y=newY;}
   }
