@@ -1081,5 +1081,68 @@ const CD={
       fo.appendChild(div);
       g.appendChild(fo);
     }
+  },
+  // Block-diagram element: a Note with an accent colour, an optional
+  // background image and a wire-anchor on every grid point of its border. It has
+  // pins:[] and no netlist.js branch, so the simulation never sees it — the
+  // anchors (wire ends with conn.type==='blockpt', see blockConnAt in
+  // schematic.js) only make wires follow the block when it moves. Rendered in
+  // #lyr-blankets (below the wires, see renderBlocks) so wires stay visible
+  // on top of an opaque image.
+  block:{
+    lbl:'BLOCK',val:'',hitW:200,hitH:120,
+    props:{
+      text:{l:'Text (Markdown)',type:'textarea',def:'Block'},
+      w:{l:'Width',def:'200'},h:{l:'Height',def:'120'},
+      color:{l:'Accent color',type:'color',def:'#7a8a99'},
+      src:{l:'Background image',type:'image'},
+      imgfit:{l:'Image fit',type:'enum',options:[{v:'cover',l:'Fill'},{v:'contain',l:'Fit'},{v:'none',l:'Stretch'}]},
+      halign:{l:'Text H-Align',type:'enum',options:[{v:'center',l:'Center'},{v:'left',l:'Left'},{v:'right',l:'Right'}]},
+      valign:{l:'Text V-Align',type:'enum',options:[{v:'middle',l:'Middle'},{v:'top',l:'Top'},{v:'bottom',l:'Bottom'}]}
+    },
+    pins:[],
+    draw(g,v){
+      var w=parseFloat(v.w)||200,h=parseFloat(v.h)||120;
+      var color=v.color||'#7a8a99';
+      if(v.src){
+        // Nested <svg> clips the image to the block (overflow hidden), which
+        // 'cover' (preserveAspectRatio slice) needs.
+        var inner=el('svg',{x:0,y:0,width:w,height:h});
+        var imgEl=document.createElementNS('http://www.w3.org/2000/svg','image');
+        imgEl.setAttribute('href',v.src); // plain href, see the image type for why
+        imgEl.setAttribute('x','0');imgEl.setAttribute('y','0');
+        imgEl.setAttribute('width',String(w));imgEl.setAttribute('height',String(h));
+        imgEl.setAttribute('preserveAspectRatio',v.imgfit==='none'?'none':(v.imgfit==='contain'?'xMidYMid meet':'xMidYMid slice'));
+        inner.appendChild(imgEl);
+        g.appendChild(inner);
+      }
+      // Colours as presentation attributes (not CSS) so they survive SVG export.
+      var body=R(g,0,0,w,h,'block-body');
+      body.setAttribute('stroke',color);
+      body.setAttribute('fill',v.src?'none':color);
+      body.setAttribute('fill-opacity','0.22');
+      // Anchor dots on the border only (dash 0 + round caps = one dot per grid
+      // step). An edge whose length is no grid multiple would be off-grid: skip.
+      var d='';
+      if(w%GRID===0)d+='M0,0H'+w+'M0,'+h+'H'+w;
+      if(h%GRID===0)d+='M0,0V'+h+'M'+w+',0V'+h;
+      PE(g,d,'block-conns');
+      if(v.text){
+        var fo=el('foreignObject',{x:6,y:6,width:Math.max(0,w-12),height:Math.max(0,h-12)});
+        var div=document.createElement('div');
+        div.setAttribute('xmlns','http://www.w3.org/1999/xhtml'); // see note: strict XML on SVG import
+        div.className='note-text block-text';
+        var ha=v.halign||'center',va=v.valign||'middle';
+        // inline (not via CSS) so the layout survives SVG export
+        div.style.display='flex';div.style.flexDirection='column';div.style.boxSizing='border-box';
+        div.style.height=Math.max(0,h-12)+'px';
+        div.style.textAlign=ha;
+        div.style.justifyContent=va==='top'?'flex-start':(va==='bottom'?'flex-end':'center');
+        if(v.src){div.style.color='#fff';div.style.textShadow='0 0 3px #000,0 0 6px #000';}
+        div.innerHTML=renderMiniMarkdown(v.text);
+        fo.appendChild(div);
+        g.appendChild(fo);
+      }
+    }
   }
 };

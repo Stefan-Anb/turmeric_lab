@@ -87,7 +87,7 @@ prüfen).
   Werte brechen das.
 - **Bauteil-Anker:** elektrische Bauteile in `CD` sind an ihrem **Zentrum**
   verankert (`x,y` = Mitte, Symbol relativ dazu gezeichnet, `hitW`/`hitH`
-  zentriert). Die reinen UI-Elemente `blanket`/`image`/`note` sind bewusst an
+  zentriert). Die reinen UI-Elemente `blanket`/`image`/`note`/`block` sind bewusst an
   der **oberen linken Ecke** verankert (`x,y` = Ecke + explizites `w`/`h`) —
   vereinfacht die Resize-Mathematik. Siehe DOKUMENTATION.md Kapitel 7 für die
   Details und warum `compBBox()` beide Fälle kennen muss.

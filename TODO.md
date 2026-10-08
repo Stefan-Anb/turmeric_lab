@@ -16,3 +16,17 @@ Einbinden der Echtzeit-Simulation (mit Javscript-Code)
 * Batch-Download der Internal Library
 
 * Schematic klonen
+
+* Energie integral (idealerweise per Measurement-Statement)
+* Fix der behavioural source (falsche Werte?!)
+
+Erweiterung der Blockschaltbild-Funktion
+* Blockdiagramm-Block
+* "Connectoren" für Bilder
+* Verbindungen farblich markieren und in verschiedenen dicken (3 reichen) anbieten
+* Evtl. Endpfeile
+
+Copy&Paste Daten in echte Zwischenablage übernehmen?
+
+Schriftgröße Markdown bei SVG-"Export"
+Allgemein SVG-Export checken - Viewport i.O.?

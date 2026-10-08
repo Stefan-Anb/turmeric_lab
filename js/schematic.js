@@ -43,6 +43,33 @@ function compPinPos(comp,pi){
   return{x:comp.x+tp.x,y:comp.y+tp.y};
 }
 
+// Default w/h of the top-left-anchored box types (blanket/image/note/block).
+const BOX_DEFAULT_SIZE={blanket:{w:400,h:300},image:{w:200,h:150},note:{w:220,h:160},block:{w:200,h:120}};
+function boxSize(c){
+  var d=BOX_DEFAULT_SIZE[c.type]||BOX_DEFAULT_SIZE.blanket;
+  return{w:parseFloat(c.w)||d.w,h:parseFloat(c.h)||d.h};
+}
+
+// Wire anchor of a 'block' element: every grid point on its border. A wire
+// end there is stored as {type:'blockpt',compId,ox,oy} (offset from the block's
+// top-left corner), so it follows the block when that moves. tol=0 -> the point
+// must lie exactly on a grid point; tol>0 -> nearest grid point within tol (px).
+// Topmost block wins. Returns null if there is none.
+function blockConnAt(x,y,tol){
+  tol=tol||0;
+  for(var i=S.components.length-1;i>=0;i--){
+    var c=S.components[i];
+    if(c.type!=='block')continue;
+    var sz=boxSize(c),gx=snap(x),gy=snap(y);
+    if(Math.hypot(x-gx,y-gy)>tol)continue;
+    if(gx<c.x||gx>c.x+sz.w||gy<c.y||gy>c.y+sz.h)continue;
+    // only the border: first/last column or row
+    if(gx!==c.x&&gx!==c.x+sz.w&&gy!==c.y&&gy!==c.y+sz.h)continue;
+    return{type:'blockpt',compId:c.id,ox:gx-c.x,oy:gy-c.y,x:gx,y:gy};
+  }
+  return null;
+}
+
 function pts2path(pts){if(!pts||pts.length<2)return'';return pts.map((p,i)=>`${i===0?'M':'L'}${p.x},${p.y}`).join(' ');} 
 function ortho(p1,p2){
   if(p1.x===p2.x||p1.y===p2.y)return[p1,p2];
@@ -136,6 +163,10 @@ function cleanupNet(startWireId,opts){
   if(!netWireIds.length)return;
   var netName=null;for(var i=0;i<netWireIds.length;i++){var w=S.wires.find(function(ww){return ww.id===netWireIds[i];});if(w&&w.net)netName=w.net;}
   var lines=[];for(var i2=0;i2<netWireIds.length;i2++){var w2=S.wires.find(function(ww){return ww.id===netWireIds[i2];});if(!w2)continue;for(var j=0;j<w2.points.length-1;j++){lines.push({p1:{x:w2.points[j].x,y:w2.points[j].y},p2:{x:w2.points[j+1].x,y:w2.points[j+1].y}});}}
+  // Per-wire style (color/width) must survive the rebuild below, which replaces
+  // the wire objects: remember the styled segments and re-apply by geometry.
+  var styledSegs=[];
+  for(var si0=0;si0<netWireIds.length;si0++){var sw0=S.wires.find(function(ww){return ww.id===netWireIds[si0];});if(!sw0||(!sw0.color&&!sw0.width))continue;for(var sj0=0;sj0<sw0.points.length-1;sj0++)styledSegs.push({a:sw0.points[sj0],b:sw0.points[sj0+1],color:sw0.color,width:sw0.width});}
   S.junctions=S.junctions.filter(function(j){return !j.wires.some(function(wid){return netWireIds.indexOf(wid)>=0;});});
   S.wires=S.wires.filter(function(w){return netWireIds.indexOf(w.id)<0;});
   S.selected=S.selected.filter(function(s){if(s.type==='wire')return!!S.wires.find(function(w){return w.id===s.id;});if(s.type==='junction')return!!S.junctions.find(function(j){return j.id===s.id;});return true;});
@@ -151,7 +182,7 @@ function cleanupNet(startWireId,opts){
   var adj={};for(var i7=0;i7<lines.length;i7++){var k1=ptKey(lines[i7].p1),k2=ptKey(lines[i7].p2); if(!adj[k1])adj[k1]=[]; if(!adj[k2])adj[k2]=[]; adj[k1].push(i7); adj[k2].push(i7);} var juncSet={}; for(var ji=0;ji<juncPts.length;ji++)juncSet[ptKey(juncPts[ji])]=true; var isBreak=function(pk){ if(juncSet[pk])return true; var deg=adj[pk]?adj[pk].length:0; if(deg!==2)return true; var parts=pk.split(','); if(findPinAt(parseInt(parts[0]),parseInt(parts[1])))return true; return false; };
   var used={}; var wirePaths=[]; for(var startIdx=0;startIdx<lines.length;startIdx++){ if(used[startIdx])continue; used[startIdx]=true; var chain=[startIdx]; var curPt=lines[startIdx].p1; while(!isBreak(ptKey(curPt))){ var neigh=adj[ptKey(curPt)]; var next=-1; for(var n=0;n<neigh.length;n++){if(!used[neigh[n]]){next=neigh[n];break;}} if(next<0)break; chain.unshift(next);used[next]=true; var nl=lines[next]; curPt=ptEq(curPt,nl.p1)?nl.p2:nl.p1; } curPt=lines[startIdx].p2; while(!isBreak(ptKey(curPt))){ var neigh2=adj[ptKey(curPt)]; var next2=-1; for(var n2=0;n2<neigh2.length;n2++){if(!used[neigh2[n2]]){next2=neigh2[n2];break;}} if(next2<0)break; chain.push(next2);used[next2]=true; var nl2=lines[next2]; curPt=ptEq(curPt,nl2.p1)?nl2.p2:nl2.p1; } if(!chain.length)continue; var pts=[]; if(chain.length===1){ pts=[{x:lines[chain[0]].p1.x,y:lines[chain[0]].p1.y},{x:lines[chain[0]].p2.x,y:lines[chain[0]].p2.y}]; } else { var fl=lines[chain[0]],sl=lines[chain[1]]; if(ptEq(fl.p2,sl.p1)||ptEq(fl.p2,sl.p2)){ pts.push({x:fl.p1.x,y:fl.p1.y});pts.push({x:fl.p2.x,y:fl.p2.y}); }else{ pts.push({x:fl.p2.x,y:fl.p2.y});pts.push({x:fl.p1.x,y:fl.p1.y}); } for(var k=1;k<chain.length;k++){ var ln=lines[chain[k]]; var last=pts[pts.length-1]; pts.push(ptEq(last,ln.p1)?{x:ln.p2.x,y:ln.p2.y}:{x:ln.p1.x,y:ln.p1.y}); } } wirePaths.push(pts); }
   var newJunc={}; for(var ji2=0;ji2<juncPts.length;ji2++){var jp=juncPts[ji2]; newJunc[ptKey(jp)]={id:newId(),x:jp.x,y:jp.y,wires:[]};}
-  for(var i8=0;i8<wirePaths.length;i8++){var wpts=wirePaths[i8]; if(wpts.length<2)continue; var wid=newId(); var nw={id:wid,points:wpts,from:null,to:null}; if(netName)nw.net=netName; var fp=wpts[0],lp=wpts[wpts.length-1]; var skipFp=false,skipLp=false; if(opts&&opts.forceOpen&&Array.isArray(opts.forcedEndpoints)){for(var fi=0;fi<opts.forcedEndpoints.length;fi++){var fe=opts.forcedEndpoints[fi]; if(ptEq(fe,fp))skipFp=true; if(ptEq(fe,lp))skipLp=true;}} var fpPin = skipFp?null:findPinAt(fp.x,fp.y); var lpPin = skipLp?null:findPinAt(lp.x,lp.y); if(fpPin)nw.from=fpPin; if(lpPin)nw.to=lpPin; var fk=ptKey(fp),lk=ptKey(lp); if(newJunc[fk]){newJunc[fk].wires.push(wid);if(!nw.from)nw.from={type:'junction',id:newJunc[fk].id};} if(newJunc[lk]){newJunc[lk].wires.push(wid);if(!nw.to)nw.to={type:'junction',id:newJunc[lk].id};} S.wires.push(nw); }
+  for(var i8=0;i8<wirePaths.length;i8++){var wpts=wirePaths[i8]; if(wpts.length<2)continue; var wid=newId(); var nw={id:wid,points:wpts,from:null,to:null}; if(netName)nw.net=netName; if(styledSegs.length){var sdone=false;for(var swi=0;swi<wpts.length-1&&!sdone;swi++){var smid={x:(wpts[swi].x+wpts[swi+1].x)/2,y:(wpts[swi].y+wpts[swi+1].y)/2};for(var ssi=0;ssi<styledSegs.length;ssi++){if(pointOnSeg(smid,styledSegs[ssi].a,styledSegs[ssi].b)){if(styledSegs[ssi].color)nw.color=styledSegs[ssi].color;if(styledSegs[ssi].width)nw.width=styledSegs[ssi].width;sdone=true;break;}}}} var fp=wpts[0],lp=wpts[wpts.length-1]; var skipFp=false,skipLp=false; if(opts&&opts.forceOpen&&Array.isArray(opts.forcedEndpoints)){for(var fi=0;fi<opts.forcedEndpoints.length;fi++){var fe=opts.forcedEndpoints[fi]; if(ptEq(fe,fp))skipFp=true; if(ptEq(fe,lp))skipLp=true;}} var fpPin = skipFp?null:findPinAt(fp.x,fp.y); var lpPin = skipLp?null:findPinAt(lp.x,lp.y); if(fpPin)nw.from=fpPin; if(lpPin)nw.to=lpPin; var fk=ptKey(fp),lk=ptKey(lp); if(newJunc[fk]){newJunc[fk].wires.push(wid);if(!nw.from)nw.from={type:'junction',id:newJunc[fk].id};} if(newJunc[lk]){newJunc[lk].wires.push(wid);if(!nw.to)nw.to={type:'junction',id:newJunc[lk].id};} if(!nw.from&&!skipFp){var bcf=blockConnAt(fp.x,fp.y);if(bcf)nw.from={type:'blockpt',compId:bcf.compId,ox:bcf.ox,oy:bcf.oy};} if(!nw.to&&!skipLp){var bcl=blockConnAt(lp.x,lp.y);if(bcl)nw.to={type:'blockpt',compId:bcl.compId,ox:bcl.ox,oy:bcl.oy};} S.wires.push(nw); }
   for(var k in newJunc){ if(newJunc[k].wires.length>0)S.junctions.push(newJunc[k]); }
 }
 

@@ -148,6 +148,15 @@ body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);displ
 .note-text strong{color:var(--text-hi);}
 .note-text del{opacity:.6;}
 
+/* ─ Block (block-diagram element) ─ fill/stroke colours are presentation
+   attributes set by CD.block.draw from the comp's accent colour (so they
+   survive SVG export); only the selection highlight lives here. The dotted
+   path marks the wire anchors on every grid point and only shows while hovering
+   the block or in wire mode. */
+.component-group.selected .block-body{stroke:var(--wire-sel);filter:drop-shadow(0 0 4px var(--wire-sel));}
+.block-conns{fill:none;stroke:var(--text-mid);stroke-width:3;stroke-linecap:round;stroke-dasharray:0 20;opacity:0;pointer-events:none;transition:opacity .12s;}
+.block-group:hover .block-conns,.component-group.selected .block-conns,#schematic-svg.wire-mode .block-conns{opacity:.55;}
+
 /* ─ Resize / crop handles (blanket + image, only rendered while selected) ─
    Resize (corner, free w+h resize) is a round accent-blue dot. Crop (image
    edge midpoints) is deliberately a different shape and color — a small
@@ -161,9 +170,11 @@ body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);displ
 .crop-handle:hover .crop-handle-bar{fill:var(--wire-sel);}
 
 .wire-group .wire-hit{stroke:transparent;stroke-width:16;fill:none;stroke-linecap:square;cursor:pointer;}
-.wire-group .wire-vis{stroke:var(--wire);stroke-width:1.5;fill:none;stroke-linecap:square;pointer-events:none;}
-.wire-group:hover .wire-vis{stroke:#40d8ff;stroke-width:2.5;}
-.wire-group.selected .wire-vis{stroke:var(--wire-sel);stroke-width:2;filter:drop-shadow(0 0 3px var(--wire-sel));}
+/* Per-wire style: renderWires sets --wc (colour) / --ww (width) on the group
+   when the wire has a custom colour/width; unset = the defaults below. */
+.wire-group .wire-vis{stroke:var(--wc,var(--wire));stroke-width:var(--ww,1.5px);fill:none;stroke-linecap:square;pointer-events:none;}
+.wire-group:hover .wire-vis{stroke:var(--wc,#40d8ff);stroke-width:calc(var(--ww,1.5px) + 1px);}
+.wire-group.selected .wire-vis{stroke:var(--wire-sel);stroke-width:calc(var(--ww,1.5px) + .5px);filter:drop-shadow(0 0 3px var(--wire-sel));}
 
 .junction-vis{fill:var(--node-color);stroke:#aa8800;stroke-width:1;}
 .junction-vis.sel{fill:var(--wire-sel);stroke:#aa3300;filter:drop-shadow(0 0 4px var(--wire-sel));}

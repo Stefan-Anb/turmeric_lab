@@ -1,6 +1,6 @@
 # TurmericLab: Code-Review und technische Dokumentation
 
-> Stand: 2026-10-07. Diese Datei dokumentiert die Codebasis, die verwendeten
+> Stand: 2026-10-08. Diese Datei dokumentiert die Codebasis, die verwendeten
 > mathematisch-algorithmischen Prinzipien, gefundene Inkonsistenzen sowie
 > Konzepte für eine generische Netzlistengenerierung und die Einbindung von
 > NGSpice-WASM. Es werden in diesem Dokument **keine** Code-Änderungen
@@ -986,6 +986,58 @@ bestehenden Typen:
 Damit funktionieren beliebige zukünftige Bauteile mit Checkbox- oder
 Mehrzeilen-Properties ohne weiteren Code im Properties-Panel.
 
+Später ergänzt (Block-Element, siehe 7.7): `type:'color'` (`<input type="color">`,
+läuft über den generischen `input`-Listener, `change` committet Undo-Schritt und
+Autosave) und `type:'image'` (Datei wählen/entfernen, Wert ist eine Data-URL in
+`comp[key]`).
+
+### 7.7 Block: Blockschaltbild-Element mit Draht-Ankern
+
+> Stand 2026-10-08. `block` basiert auf der Notiz (Markdown-Text, `w`/`h`,
+> Anker oben links), ist aber ein Baustein für Blockschaltbilder. Wie die
+> anderen Annotationen hat er `pins:[]` und keinen Zweig in `netlist.js`:
+> für die Netzliste existiert er nicht.
+
+```
+block: { id, type:'block', x, y, w, h, text, color, src?, imgfit, halign, valign }
+```
+
+- **Darstellung:** `color` ist die Akzentfarbe (Default neutral `#7a8a99`,
+  per Colorpicker änderbar): Rahmen in `color`, Füllung `color` mit
+  `fill-opacity .22`. Optional `src` (Data-URL) als Hintergrundbild;
+  `imgfit` = `cover` (Fill, Default) / `contain` (Fit) / `none` (Stretch). Mit
+  Bild entfällt die Füllung, der Text wird weiß mit Schatten. Farben stehen als
+  Presentation-Attribute (nicht per CSS), damit sie den SVG-Export überleben;
+  Flex-Layout des Textes ebenfalls inline.
+- **Layer:** `renderBlocks()` zeichnet Blöcke in `#lyr-blankets` (nach den
+  Blankets), also **unter** den Netzlinien und Bauteilen. So bleiben Drähte auch
+  über einem deckenden Bild sichtbar. Anders als beim Blanket ist der ganze
+  Körper klick-/ziehbar. `renderComps()` überspringt `block`.
+- **Konnektoren:** Jeder Rasterpunkt auf dem **Rand** des Blocks (erste/letzte
+  Spalte und Zeile) ist ein Draht-Anker; das Innere ist es nicht (ein Klick dort
+  im Wire-Modus setzt nur einen freien Punkt). Kanten, deren Länge kein
+  Rastervielfaches ist, haben keine Anker. Es
+  gibt keine `pins`; stattdessen löst `blockConnAt(x,y,tol)`
+  ([schematic.js](js/schematic.js)) einen Punkt auf
+  `{type:'blockpt',compId,ox,oy}` auf (Offset zur Ecke). `cleanupNet` weist
+  diese Verbindung jedem Drahtende zu, das auf einem Blockpunkt liegt (Pin und
+  Junction haben Vorrang), `handleWireClick` behandelt einen Klick auf einen
+  Randpunkt als Terminal. Im Select-Modus erscheint über dem Anker (6 px Radius) der
+  Hover-Ring; ein Klick dort startet einen Draht, an jeder anderen Stelle zieht
+  er den Block. Die Ankerpunkte (`.block-conns`, ein gepunkteter Pfad) sind nur
+  bei Hover, Selektion und im Wire-Modus sichtbar und werden beim Export entfernt.
+- **Verschieben:** `moveComp` zieht Drahtenden mit `blockpt`-Verbindung über
+  `ox`/`oy` nach (`rerouteEnd`); Drähte mit beiden Enden am selben Block wandern
+  komplett mit, Junctions im Blockbereich ebenfalls (in der Gruppenverschiebung
+  nur die nicht ohnehin selektierten, `skipJuncIds`). `fixedEnd`/`endMoved` und
+  die Segment-Drag-Logik behandeln `blockpt` wie einen Pin.
+- **Löschen/Copy-Paste:** Beim Löschen eines Blocks bleiben die Drähte stehen,
+  nur die Anbindung entfällt. Copy/Paste mappt `blockpt.compId` wie bei Pins um.
+- Netzliste: Drähte, die nur an Blöcken hängen, sind ordinäre freie Netze
+  ohne Bauteilpins.
+- Hilfen: `BOX_DEFAULT_SIZE`/`boxSize(c)` ersetzen die früheren verstreuten
+  Default-Größen-Ternaries für blanket/image/note/block.
+
 ### 7.6 Gefundene und behobene Bugs abseits der Kernfeatures
 
 Beim iterativen Testen der vier neuen Elemente traten vier Bugs auf, die alle
@@ -1442,6 +1494,32 @@ die Standard-Totzeit des PWM-Generators ist 200n.
   im Pages-Output (Schritt "Write build info": Release-Tag bzw. Branchname,
   `github.sha`, Build-Datum). `version.js` wird vor allen anderen Skripten
   geladen.
+
+### 15.x Wire-Stil: Farbe und Stärke pro Segment
+
+> Stand 2026-10-08. Reine Darstellung, ohne Netzlisten-Wirkung.
+
+- **Datenmodell:** Optional `wire.color` (`#rrggbb`) und `wire.width`
+  (`2` = mittel, `3` = dick; fehlt = `1` = dünn, die bisherige Stärke). Ohne
+  beide Felder sieht ein Wire aus wie zuvor. Stärken in `WIRE_WIDTHS`
+  ([app.js](js/app.js)): 1,5 / 3 / 5 px.
+- **Segment-Semantik:** Der Stil gilt für das einzelne Wire-Objekt (Strecke
+  zwischen Pins/Junctions, wie bei "Show label on this segment"), nicht für das
+  ganze Netz. Properties-Panel: Colorpicker mit "Default"-Button und drei Radios.
+- **Rendering:** `renderWires` setzt die CSS-Variablen `--wc`/`--ww` auf der
+  Wire-Gruppe; die Regeln für `.wire-vis` lesen sie (mit den alten Werten als
+  Fallback), Hover und Selektion bleiben so erhalten (Selektion zeigt weiter die
+  Selektionsfarbe, Hover ist 1 px bzw. 0,5 px dicker als der Basiswert).
+- **cleanupNet:** Die Funktion ersetzt Wire-Objekte durch neue. Der Stil wird
+  deshalb vorher pro Teilstrecke gemerkt und über die Geometrie (Mittelpunkt einer
+  Strecke liegt auf einer gestylten alten Strecke) auf die neuen Wires übertragen;
+  geteilte Wires (Junction) behalten ihn. Werden zwei Strecken mit
+  unterschiedlichem Stil zu einem Wire verschmolzen (kollinear, ohne
+  Junction/Pin), gewinnt der erste gefundene Stil. Ein neu angehängter
+  ungestylter Draht übernimmt dabei den Stil des Nachbarn.
+- **Copy/Paste, Export:** Copy/Paste kopiert `color`/`width`. Der SVG-Export
+  setzt sie inline (Stärken 2,5 / 4 / 6), da das Export-Stylesheet die Klassen
+  fest vorgibt.
 
 ## Quellen (NGSpice / WASM)
 

@@ -10,19 +10,18 @@ const lyrJ=document.getElementById('lyr-junc');
 const lyrO=document.getElementById('lyr-overlay');
 
 // Pure UI annotation types (never appear in the netlist, never rotate/mirror).
-const UI_ANNOTATION_TYPES=['blanket','image','note','textlabel'];
+const UI_ANNOTATION_TYPES=['blanket','image','note','textlabel','block'];
 // Types anchored at their TOP-LEFT corner (x,y) with explicit w/h, instead of
 // the usual "anchored at center" convention every electrical component uses.
-const TOPLEFT_BOX_TYPES=['blanket','image','note'];
+const TOPLEFT_BOX_TYPES=['blanket','image','note','block'];
 
 // Bounding box (world coords) for a component, used by marquee selection and
 // zoom-to-fit. Handles the top-left-anchored box types and the measured
 // text-label bbox specially; falls back to the usual centered hitW/hitH box.
 function compBBox(c){
   if(TOPLEFT_BOX_TYPES.includes(c.type)){
-    var w=parseFloat(c.w)||(c.type==='image'?200:(c.type==='note'?220:400));
-    var h=parseFloat(c.h)||(c.type==='image'?150:(c.type==='note'?160:300));
-    return {left:c.x,right:c.x+w,top:c.y,bottom:c.y+h};
+    var sz=boxSize(c);
+    return {left:c.x,right:c.x+sz.w,top:c.y,bottom:c.y+sz.h};
   }
   if(c.type==='textlabel'){
     var fs=parseFloat(c.fontSize)||16;
@@ -168,7 +167,7 @@ function applyView(){
 /* Finder functions moved to js/schematic.js (findPin, findWireEnd, findWireSeg, nearSeg, juncAt, wireEndsAt) */
 
 // ═══ RENDER ═══
-function renderAll(){renderBlankets();renderComps();renderWires();renderJuncs();updateStatus();}
+function renderAll(){renderBlankets();renderBlocks();renderComps();renderWires();renderJuncs();updateStatus();}
 
 // Appends a small circular resize handle (corner, free w+h resize) at local
 // (hx,hy) inside g, wired to start a resize drag on mousedown. Only ever
@@ -210,7 +209,7 @@ function addCropHandle(g,hx,hy,orientation,cursor,target){
 function renderComps(){
   lyrC.innerHTML='';
   for(const comp of S.components){
-    if(comp.type==='blanket') continue; // rendered separately, always in the background
+    if(comp.type==='blanket'||comp.type==='block') continue; // rendered separately, in the background layer
     const def=CD[comp.type];
     var rot=comp.rot||0,mir=comp.mirror||false;
     const g=el('g',{
@@ -235,7 +234,7 @@ function renderComps(){
     }
     var isSelected=S.selected.some(function(s){return s.type==='comp'&&s.id===comp.id;});
     if(TOPLEFT_BOX_TYPES.includes(comp.type)){
-      var bw=parseFloat(comp.w)||(comp.type==='image'?200:220),bh=parseFloat(comp.h)||(comp.type==='image'?150:160);
+      var bsz=boxSize(comp),bw=bsz.w,bh=bsz.h;
       R(g,0,0,bw,bh,'hit-rect');
       if(isSelected&&comp.type==='image'){
         addResizeHandle(g,bw,bh,'nwse-resize',{type:'resize',id:comp.id});
@@ -243,7 +242,7 @@ function renderComps(){
         addCropHandle(g,bw/2,bh,'h','ns-resize',{type:'crop',id:comp.id,edge:'bottom'});
         addCropHandle(g,0,bh/2,'v','ew-resize',{type:'crop',id:comp.id,edge:'left'});
         addCropHandle(g,bw,bh/2,'v','ew-resize',{type:'crop',id:comp.id,edge:'right'});
-      } else if(isSelected&&comp.type==='note'){
+      } else if(isSelected&&comp.type==='note'){ // (block is rendered by renderBlocks)
         addResizeHandle(g,bw,bh,'nwse-resize',{type:'resize',id:comp.id});
       }
     } else if(comp.type==='textlabel'){
@@ -318,6 +317,27 @@ function renderBlankets(){
   }
 }
 
+// Block (block-diagram element): lives in the same background layer as the
+// blankets, but after them, so it sits above a blanket yet below wires and
+// real components. Unlike a blanket, its whole body is clickable/draggable.
+function renderBlocks(){
+  for(const comp of S.components){
+    if(comp.type!=='block') continue;
+    const g=el('g',{transform:`translate(${comp.x},${comp.y})`,class:'component-group block-group',
+      'data-id':comp.id,'data-type':'block'});
+    CD.block.draw(g,comp);
+    var sz=boxSize(comp);
+    R(g,0,0,sz.w,sz.h,'hit-rect');
+    var isSelected=S.selected.some(function(s){return s.type==='comp'&&s.id===comp.id;});
+    if(isSelected){
+      g.classList.add('selected');
+      addResizeHandle(g,sz.w,sz.h,'nwse-resize',{type:'resize',id:comp.id});
+    }
+    g.addEventListener('mousedown',(function(id){return function(e){onCompDown(e,id);};})(comp.id));
+    lyrBlk.appendChild(g);
+  }
+}
+
 function onBlanketTitleDown(e,id){
   if(e.button!==0)return; e.stopPropagation();
   if(S.mode!=='select')return;
@@ -327,6 +347,11 @@ function onBlanketTitleDown(e,id){
   startDrag(e,{type:'comp',id:id});
 }
 
+// Selectable wire widths (w.width; unset = 1 = the original thin wire).
+// px = on screen, exportPx = in the print-oriented SVG export (base 2.5).
+const WIRE_WIDTHS={1:{px:1.5,exportPx:2.5,l:'Thin'},2:{px:3,exportPx:4,l:'Medium'},3:{px:5,exportPx:6,l:'Thick'}};
+const WIRE_DEFAULT_COLOR='#00c8ff';
+
 function renderWires(){
   lyrW.innerHTML='';
   for(const w of S.wires){
@@ -335,6 +360,10 @@ function renderWires(){
       'data-from':w.from?JSON.stringify(w.from):'',
       'data-to':w.to?JSON.stringify(w.to):''
     });
+    // Custom colour / width (see WIRE_WIDTHS): CSS variables, so hover and
+    // selection highlighting keep working; data-* for the SVG export.
+    if(w.color){grp.style.setProperty('--wc',w.color);grp.setAttribute('data-color',w.color);}
+    if(w.width&&WIRE_WIDTHS[w.width]){grp.style.setProperty('--ww',WIRE_WIDTHS[w.width].px+'px');grp.setAttribute('data-width',w.width);}
     const hit=el('path',{d:pts2path(w.points),class:'wire-hit'});
     const vis=el('path',{d:pts2path(w.points),class:'wire-vis'});
     grp.appendChild(hit);grp.appendChild(vis);
@@ -437,6 +466,15 @@ function renderProps(){
     '<div class="prop-row" style="flex-direction:row;align-items:center;gap:8px;padding:8px 12px">'+
     '<input type="checkbox" id="wire-show-lbl"'+(w.showLabel?' checked':'')+'>'+
     '<label for="wire-show-lbl" class="prop-lbl" style="margin:0">Show label on this segment</label></div>'+
+    '<div class="props-sect">Style (this segment)</div>'+
+    '<div class="prop-row"><div class="prop-lbl">Color</div>'+
+    '<div style="padding:6px 12px;display:flex;gap:8px;align-items:center">'+
+    '<input class="prop-color" id="wire-color" type="color" value="'+(w.color||WIRE_DEFAULT_COLOR)+'"/>'+
+    '<button type="button" class="tb-btn" id="wire-color-reset"'+(w.color?'':' disabled')+'>Default</button></div></div>'+
+    '<div class="prop-row"><div class="prop-lbl">Width</div><div style="padding:6px 12px;display:flex;gap:8px;align-items:center">'+
+    Object.keys(WIRE_WIDTHS).map(function(k){
+      return '<label style="display:flex;align-items:center;gap:6px"><input type="radio" name="wire-width" value="'+k+'"'+(String(w.width||1)===k?' checked':'')+'> '+WIRE_WIDTHS[k].l+'</label>';
+    }).join('')+'</div></div>'+
     '<div class="props-sect">Info</div>'+
     '<div class="info-text">Segments in net: '+netIds.length+'<br>Points: '+w.points.length+'</div>';
     // Live apply: wire net name and showLabel
@@ -444,6 +482,20 @@ function renderProps(){
     if(netI){netI.addEventListener('input',function(){var newNet=netI.value.trim();if(newNet!==(w.net||''))propagateNetName(w.id,newNet);if(newNet){var ids=getNetWires(w.id);syncNetConnsFromNet(ids,newNet);}renderAll();});}
     const showCb=document.getElementById('wire-show-lbl');
     if(showCb){showCb.addEventListener('change',function(){w.showLabel=showCb.checked;renderAll();});}
+    // Style applies to this wire object (= one segment between pins/junctions), not the whole net.
+    const colI=document.getElementById('wire-color'),colReset=document.getElementById('wire-color-reset');
+    if(colI){
+      colI.addEventListener('input',function(){w.color=colI.value;if(colReset)colReset.disabled=false;renderAll();});
+      colI.addEventListener('change',function(){pushState();saveSchematic();});
+    }
+    if(colReset){colReset.addEventListener('click',function(){delete w.color;colI.value=WIRE_DEFAULT_COLOR;colReset.disabled=true;renderAll();pushState();saveSchematic();});}
+    pc.querySelectorAll('input[name="wire-width"]').forEach(function(r){
+      r.addEventListener('change',function(){
+        if(!r.checked)return;
+        if(r.value==='1')delete w.width;else w.width=parseInt(r.value,10);
+        renderAll();pushState();saveSchematic();
+      });
+    });
     return;
   }
   if(s.type==='junction'){
@@ -485,6 +537,14 @@ function renderProps(){
       html+='<div class="prop-row" style="flex-direction:row;align-items:center;gap:8px;padding:8px 12px">'+
       '<input type="checkbox" data-key="'+key+'" id="prop-bool-'+key+'"'+chk+'>'+
       '<label for="prop-bool-'+key+'" class="prop-lbl" style="margin:0">'+pd.l+'</label></div>';
+    } else if(pd.type==='color'){
+      const cv=/^#[0-9a-f]{6}$/i.test(String(val))?String(val):(pd.def||'#7a8a99');
+      html+='<div class="prop-row"><div class="prop-lbl">'+pd.l+'</div>'+
+      '<input class="prop-input prop-color" data-key="'+key+'" type="color" value="'+cv+'"/></div>';
+    } else if(pd.type==='image'){
+      html+='<div class="prop-row"><div class="prop-lbl">'+pd.l+'</div>'+
+      '<div style="padding:6px 12px;display:flex;gap:8px"><button type="button" class="tb-btn" data-imgpick="'+key+'">'+(val?'Replace…':'Choose…')+'</button>'+
+      (val?'<button type="button" class="tb-btn" data-imgclear="'+key+'">Remove</button>':'')+'</div></div>';
     } else if(pd.type==='textarea'){
       html+='<div class="prop-row"><div class="prop-lbl">'+pd.l+'</div>'+
       '<textarea class="prop-input" data-key="'+key+'" rows="6">'+esc(String(val))+'</textarea></div>';
@@ -527,6 +587,31 @@ function renderProps(){
       // Don't re-render the props panel on every keystroke (that steals focus).
       // Only re-render if this input explicitly requires it (none do here).
     });
+  });
+  // colour pickers update live via the generic 'input' listener above; commit
+  // (undo step + autosave) once the picker closes
+  pc.querySelectorAll('input.prop-color').forEach(function(inp){
+    inp.addEventListener('change',function(){pushState();saveSchematic();});
+  });
+  // image properties (comp[key] = data URL): pick a file / remove it
+  pc.querySelectorAll('[data-imgpick]').forEach(function(btn){
+    var key=btn.getAttribute('data-imgpick');
+    btn.addEventListener('click',function(){
+      var fi=document.createElement('input');
+      fi.type='file';fi.accept='image/*';
+      fi.addEventListener('change',function(){
+        var file=fi.files[0];
+        if(!file||!file.type||file.type.indexOf('image/')!==0)return;
+        var reader=new FileReader();
+        reader.onload=function(ev){comp[key]=ev.target.result;renderAll();renderProps();pushState();saveSchematic();};
+        reader.readAsDataURL(file);
+      });
+      fi.click();
+    });
+  });
+  pc.querySelectorAll('[data-imgclear]').forEach(function(btn){
+    var key=btn.getAttribute('data-imgclear');
+    btn.addEventListener('click',function(){delete comp[key];renderAll();renderProps();pushState();saveSchematic();});
   });
   // ƒ buttons: pick a parameter for the neighbouring value field
   pc.querySelectorAll('.prop-param-btn').forEach(function(btn){
@@ -599,6 +684,7 @@ function setMode(m){
   if(btn)btn.classList.add('active');
   document.getElementById('mode-label').textContent=m.toUpperCase();
   svg.style.cursor=m==='wire'||m==='place'?'crosshair':(m==='probe'?'crosshair':'default');
+  svg.classList.toggle('wire-mode',m==='wire'); // shows the Block anchor dots
   if(m!=='place')document.querySelectorAll('.comp-btn').forEach(function(b){b.classList.remove('selected');});
   hint(m==='wire'?'Click to start wire \u2014 click again or pin to finish':m==='place'?'Click to place':
     m==='probe'?(eqSinkActive()?'Click a net or pin to insert its signal into the equation, drag for v(a,b)':'Click to probe net or pin \u2014 drag to probe two points'):m==='select'?'Click to select \u00b7 drag to move \u00b7 hover pin to start wire':'Click to select \u00b7 drag to move \u00b7 hover pin to start wire');
@@ -1000,6 +1086,11 @@ svg.addEventListener('mousemove',function(e){
     else{
       var we=findWireEnd(pt.x,pt.y);
       if(we)showPinRing(we.x,we.y);
+      else{
+        // only while the block itself is under the cursor (not a part drawn over it)
+        var bpt=(e.target&&e.target.closest&&e.target.closest('.block-group'))?blockConnAt(pt.x,pt.y,6):null;
+        if(bpt)showPinRing(bpt.x,bpt.y);
+      }
     }
   } else if(S.mode==='probe'){
     if(probeState.dragging){
@@ -1155,6 +1246,13 @@ function onCompDown(e,compId){
     return;
   }
   if(S.mode==='select'){
+    // A press right on a Block's grid-point anchor (the hover ring) starts a
+    // wire instead of moving the block; anywhere else on the body it drags.
+    var bcomp=S.components.find(function(c){return c.id===compId;});
+    if(bcomp&&bcomp.type==='block'){
+      var bp=svgPt(e),bc=blockConnAt(bp.x,bp.y,6);
+      if(bc&&bc.compId===compId){startWireFromPin(bc.x,bc.y,{type:'blockpt',compId:bc.compId,ox:bc.ox,oy:bc.oy});return;}
+    }
     if(!S.selected.some(function(s){return s.type==='comp'&&s.id===compId;})){clearSel();S.selected=[{type:'comp',id:compId}];renderAll();renderProps();}
     startDrag(e,{type:'comp',id:compId});
   }
@@ -1204,6 +1302,7 @@ function startWireFromPin(absX,absY,conn){
   var btn=document.getElementById('btn-wire');if(btn)btn.classList.add('active');
   document.getElementById('mode-label').textContent='WIRE';
   svg.style.cursor='crosshair';
+  svg.classList.add('wire-mode');
   // Set wire drawing state
   S.wire.drawing=true;
   S.wire.startPt={x:absX,y:absY};
@@ -1232,9 +1331,12 @@ function handleWireClick(pt){
   var we=!near?findWireEnd(pt.x,pt.y,16):null;
   var sp=near?{x:near.x,y:near.y}:we?{x:we.x,y:we.y}:snp(pt.x,pt.y);
   var wseg=(!near&&!we)?findWireSeg(pt.x,pt.y,10):null;
-  var conn=near||we||(wseg?{type:'wire-seg',wireId:wseg.wireId,segIdx:wseg.segIdx,x:sp.x,y:sp.y}:null);
+  // Any grid point on a Block's border is a wire anchor (lowest priority: pins,
+  // wire ends and wires on top of the block win).
+  var bpt=(!near&&!we&&!wseg)?blockConnAt(sp.x,sp.y):null;
+  var conn=near||we||(wseg?{type:'wire-seg',wireId:wseg.wireId,segIdx:wseg.segIdx,x:sp.x,y:sp.y}:null)||bpt;
 
-  var isTerminal=!!(near||we||wseg);
+  var isTerminal=!!(near||we||wseg||bpt);
 
   if(!S.wire.drawing){
     S.wire.drawing=true;
@@ -1428,7 +1530,7 @@ function startDrag(e,target){
     // re-routed independently and the wire is distorted.
     for(const w of S.wires){
       if(selIdsWire.has(w.id)||!w.from||!w.to)continue;
-      const endMoved=function(c){return c&&((c.type==='pin'&&selIdsComp.has(c.compId))||(c.type==='junction'&&selIdsJunc.has(c.id)));};
+      const endMoved=function(c){return c&&(((c.type==='pin'||c.type==='blockpt')&&selIdsComp.has(c.compId))||(c.type==='junction'&&selIdsJunc.has(c.id)));};
       if(endMoved(w.from)&&endMoved(w.to))groupInitial.push({type:'wire',id:w.id,points:w.points.map(p=>({x:p.x,y:p.y}))});
     }
     S.drag={active:true,target:{type:'group'},sm:pt,groupInitial:groupInitial,origWireSignatures:origWireSignatures,moved:false,lastDx:0,lastDy:0};
@@ -1471,7 +1573,7 @@ function onDragMove(e){
     for(const it of S.drag.groupInitial){
       if(it.type==='comp'){
         const c=S.components.find(cc=>cc.id===it.id); if(!c) continue;
-        const nx=it.x+dx, ny=it.y+dy; moveComp(it.id,nx,ny);
+        const nx=it.x+dx, ny=it.y+dy; moveComp(it.id,nx,ny,movedJuncIds);
       } else if(it.type==='junction'){
         const j=S.junctions.find(jj=>jj.id===it.id); if(!j) continue;
         const nx=it.x+dx, ny=it.y+dy; moveJunc(it.id,nx,ny);
@@ -1481,7 +1583,7 @@ function onDragMove(e){
     // re-route attached wire ends). A wire moves as a whole unless one end is
     // attached to something that stays put (unmoved pin/junction); that end
     // must stay anchored, so those wires keep the end-only re-routing.
-    const fixedEnd=function(c){return c&&((c.type==='pin'&&!movedCompIds.has(c.compId))||(c.type==='junction'&&!movedJuncIds.has(c.id)));};
+    const fixedEnd=function(c){return c&&(((c.type==='pin'||c.type==='blockpt')&&!movedCompIds.has(c.compId))||(c.type==='junction'&&!movedJuncIds.has(c.id)));};
     for(const it of S.drag.groupInitial){
       if(it.type!=='wire')continue;
       const w=S.wires.find(ww=>ww.id===it.id); if(!w) continue;
@@ -1508,8 +1610,8 @@ function onWireSegDragMove(e){
   var w=S.wires.find(function(w){return w.id===t.wireId;});if(!w)return;
   var isFirst=(t.segIdx===0);
   var isLast=(t.segIdx+1===w.points.length-1);
-  var fromPin=isFirst&&w.from&&w.from.type==='pin';
-  var toPin=isLast&&w.to&&w.to.type==='pin';
+  var fromPin=isFirst&&w.from&&(w.from.type==='pin'||w.from.type==='blockpt');
+  var toPin=isLast&&w.to&&(w.to.type==='pin'||w.to.type==='blockpt');
   if(fromPin&&toPin)return; // single-segment pin-to-pin, can't drag
   if(t.isHoriz){
     var dy=snap(pt.y-S.drag.sm.y);
@@ -1605,9 +1707,9 @@ function updateConnectedEndpoint(w,end,pt){
 function startResizeDrag(e,target){
   e.stopPropagation(); e.preventDefault();
   var c=S.components.find(function(cc){return cc.id===target.id;}); if(!c)return;
-  var defW=c.type==='image'?200:(c.type==='note'?220:400), defH=c.type==='image'?150:(c.type==='note'?160:300);
+  var sz=boxSize(c);
   S.drag={active:true,target:target,sm:svgPt(e),
-    w0:parseFloat(c.w)||defW, h0:parseFloat(c.h)||defH, x0:c.x, y0:c.y,
+    w0:sz.w, h0:sz.h, x0:c.x, y0:c.y,
     crop0: c.crop?{x:c.crop.x,y:c.crop.y,w:c.crop.w,h:c.crop.h}:null,
     moved:false};
 }
@@ -1749,9 +1851,32 @@ function onDragEnd(){
   S.drag.active=false;S.drag.target=null;
 }
 
-function moveComp(compId,nx,ny){
+// skipJuncIds (optional Set): junctions that the caller moves itself (group drag).
+function moveComp(compId,nx,ny,skipJuncIds){
   var c=S.components.find(function(c){return c.id===compId;});if(!c)return;
-  var dx=nx-c.x,dy=ny-c.y;c.x=nx;c.y=ny;
+  var dx=nx-c.x,dy=ny-c.y;
+  if(c.type==='block'){
+    // Junctions inside the block's area travel with it (collected from the OLD
+    // bounds), and wire ends anchored to a block point follow via ox/oy.
+    var bsz=boxSize(c);
+    var inJuncs=S.junctions.filter(function(j){
+      return j.x>=c.x&&j.x<=c.x+bsz.w&&j.y>=c.y&&j.y<=c.y+bsz.h&&!(skipJuncIds&&skipJuncIds.has(j.id));
+    });
+    c.x=nx;c.y=ny;
+    for(var bwi=0;bwi<S.wires.length;bwi++){
+      var bw=S.wires[bwi];
+      if(bw.from&&bw.from.type==='blockpt'&&bw.from.compId===compId&&bw.to&&bw.to.type==='blockpt'&&bw.to.compId===compId){
+        // both ends on this block: the whole wire travels with it
+        bw.points=bw.points.map(function(p){return{x:p.x+dx,y:p.y+dy};});
+        continue;
+      }
+      if(bw.from&&bw.from.type==='blockpt'&&bw.from.compId===compId)rerouteEnd(bw,'from',nx+bw.from.ox,ny+bw.from.oy);
+      if(bw.to&&bw.to.type==='blockpt'&&bw.to.compId===compId)rerouteEnd(bw,'to',nx+bw.to.ox,ny+bw.to.oy);
+    }
+    for(var bji=0;bji<inJuncs.length;bji++)moveJunc(inJuncs[bji].id,inJuncs[bji].x+dx,inJuncs[bji].y+dy);
+    return;
+  }
+  c.x=nx;c.y=ny;
   var def=CD[c.type];var rot=c.rot||0,mir=c.mirror||false;
   for(var pi=0;pi<def.pins.length;pi++){
     var tp=xfPin(def.pins[pi].x,def.pins[pi].y,rot,mir);
@@ -1810,6 +1935,12 @@ function deleteSelected(){
   saveSchematic();
 }
 function removeComp(cid){
+  // Wires attached to a block's anchors are NOT removed with it (they are
+  // plain wires that merely snap along) — only the attachment is dropped.
+  S.wires.forEach(function(w){
+    if(w.from&&w.from.type==='blockpt'&&w.from.compId===cid)w.from=null;
+    if(w.to&&w.to.type==='blockpt'&&w.to.compId===cid)w.to=null;
+  });
   var toRm=S.wires.filter(function(w){return(w.from&&w.from.type==='pin'&&w.from.compId===cid)||(w.to&&w.to.type==='pin'&&w.to.compId===cid);}).map(function(w){return w.id;});
   for(var i=0;i<toRm.length;i++)removeWire(toRm[i]);
   S.components=S.components.filter(function(c){return c.id!==cid;});
@@ -1842,8 +1973,12 @@ function copyToBuffer(){
     var w=S.wires[i];
     if(selectedIds.wire[w.id]){
       var newW={id:w.id,points:w.points.slice(),from:null,to:null};
+      if(w.color)newW.color=w.color;
+      if(w.width)newW.width=w.width;
       if(w.from){
-        if(w.from.type==='pin'){
+        if(w.from.type==='blockpt'){
+          if(selectedIds.comp[w.from.compId])newW.from={type:'blockpt',compId:w.from.compId,ox:w.from.ox,oy:w.from.oy};
+        }else if(w.from.type==='pin'){
           var connCompId=w.from.compId;
           if(selectedIds.comp[connCompId]){
             newW.from={type:'pin',compId:w.from.compId,pinIdx:w.from.pinIdx};
@@ -1855,7 +1990,9 @@ function copyToBuffer(){
         }
       }
       if(w.to){
-        if(w.to.type==='pin'){
+        if(w.to.type==='blockpt'){
+          if(selectedIds.comp[w.to.compId])newW.to={type:'blockpt',compId:w.to.compId,ox:w.to.ox,oy:w.to.oy};
+        }else if(w.to.type==='pin'){
           var connCompId=w.to.compId;
           if(selectedIds.comp[connCompId]){
             newW.to={type:'pin',compId:w.to.compId,pinIdx:w.to.pinIdx};
@@ -1958,12 +2095,16 @@ function pasteFromBuffer(){
     var newPoints=[];
     for(var j=0;j<ow.points.length;j++){newPoints.push({x:ow.points[j].x,y:ow.points[j].y});}
     var newFrom=null,newTo=null;
-    if(ow.from&&ow.from.compId&&S.pasteMode.compMap[ow.from.compId]){
+    if(ow.from&&ow.from.type==='blockpt'&&S.pasteMode.compMap[ow.from.compId]){
+      newFrom={type:'blockpt',compId:S.pasteMode.compMap[ow.from.compId],ox:ow.from.ox,oy:ow.from.oy};
+    }else if(ow.from&&ow.from.compId&&S.pasteMode.compMap[ow.from.compId]){
       newFrom={type:'pin',compId:S.pasteMode.compMap[ow.from.compId],pinIdx:ow.from.pinIdx};
     }else if(ow.from&&ow.from.id&&S.pasteMode.juncMap[ow.from.id]){
       newFrom={type:'junction',id:S.pasteMode.juncMap[ow.from.id]};
     }
-    if(ow.to&&ow.to.compId&&S.pasteMode.compMap[ow.to.compId]){
+    if(ow.to&&ow.to.type==='blockpt'&&S.pasteMode.compMap[ow.to.compId]){
+      newTo={type:'blockpt',compId:S.pasteMode.compMap[ow.to.compId],ox:ow.to.ox,oy:ow.to.oy};
+    }else if(ow.to&&ow.to.compId&&S.pasteMode.compMap[ow.to.compId]){
       newTo={type:'pin',compId:S.pasteMode.compMap[ow.to.compId],pinIdx:ow.to.pinIdx};
     }else if(ow.to&&ow.to.id&&S.pasteMode.juncMap[ow.to.id]){
       newTo={type:'junction',id:S.pasteMode.juncMap[ow.to.id]};
@@ -2055,17 +2196,23 @@ function confirmPaste(dx,dy){
     var newPoints=[];
     for(var j=0;j<ow.points.length;j++){var sp=snp(ow.points[j].x+dx,ow.points[j].y+dy);newPoints.push(sp);}
     var newFrom=null,newTo=null;
-    if(ow.from&&ow.from.compId&&S.pasteMode.compMap[ow.from.compId]){
+    if(ow.from&&ow.from.type==='blockpt'&&S.pasteMode.compMap[ow.from.compId]){
+      newFrom={type:'blockpt',compId:S.pasteMode.compMap[ow.from.compId],ox:ow.from.ox,oy:ow.from.oy};
+    }else if(ow.from&&ow.from.compId&&S.pasteMode.compMap[ow.from.compId]){
       newFrom={type:'pin',compId:S.pasteMode.compMap[ow.from.compId],pinIdx:ow.from.pinIdx};
     }else if(ow.from&&ow.from.id&&S.pasteMode.juncMap[ow.from.id]){
       newFrom={type:'junction',id:S.pasteMode.juncMap[ow.from.id]};
     }
-    if(ow.to&&ow.to.compId&&S.pasteMode.compMap[ow.to.compId]){
+    if(ow.to&&ow.to.type==='blockpt'&&S.pasteMode.compMap[ow.to.compId]){
+      newTo={type:'blockpt',compId:S.pasteMode.compMap[ow.to.compId],ox:ow.to.ox,oy:ow.to.oy};
+    }else if(ow.to&&ow.to.compId&&S.pasteMode.compMap[ow.to.compId]){
       newTo={type:'pin',compId:S.pasteMode.compMap[ow.to.compId],pinIdx:ow.to.pinIdx};
     }else if(ow.to&&ow.to.id&&S.pasteMode.juncMap[ow.to.id]){
       newTo={type:'junction',id:S.pasteMode.juncMap[ow.to.id]};
     }
     var nw={id:S.pasteMode.wireIds[i],points:newPoints,from:newFrom,to:newTo};
+    if(ow.color)nw.color=ow.color;
+    if(ow.width)nw.width=ow.width;
     S.wires.push(nw);
     S.pasteMode.ghostWireEls[i].hit.remove();
     S.pasteMode.ghostWireEls[i].vis.remove();
@@ -2242,7 +2389,15 @@ function exportSVG(opts){
   // remove interactive/overlay elements
   var overlay=clone.querySelector('#lyr-overlay');
   if(overlay)overlay.remove();
-  clone.querySelectorAll('.wire-hit,.hit-rect,.junction-hit,.pin-ring,.ghost,.resize-handle,.crop-handle').forEach(function(e){e.remove();});
+  clone.querySelectorAll('.wire-hit,.hit-rect,.junction-hit,.pin-ring,.ghost,.resize-handle,.crop-handle,.block-conns').forEach(function(e){e.remove();});
+  // custom wire colour/width: the export stylesheet below sets the base look
+  // per class, so apply them inline (widths scaled to the export base of 2.5)
+  clone.querySelectorAll('.wire-group').forEach(function(g){
+    var vis=g.querySelector('.wire-vis'),c=g.getAttribute('data-color'),wd=WIRE_WIDTHS[g.getAttribute('data-width')];
+    if(!vis)return;
+    if(c)vis.style.stroke=c;
+    if(wd)vis.style.strokeWidth=wd.exportPx;
+  });
   // remove grid and defs so exported SVG is clean for printing
   var gb=clone.querySelector('#grid-bg'); if(gb) gb.remove();
   var defs=clone.querySelector('defs'); if(defs) defs.remove();
