@@ -210,7 +210,7 @@ function buildSpiceRefMap(){
     if(t==='npn'||t==='pnp'){map[c.id]='Q'+(c.label||'');continue;}
     if(t==='nmos'||t==='pmos'){map[c.id]='M'+(c.label||'');continue;}
     if(t==='diode'||t==='led'||t==='zener'){map[c.id]='D'+(c.label||'');continue;}
-    if(t==='scr'||t==='pwmgen'||MC_SUBCKT[t]){map[c.id]='X'+(c.label||'');continue;}
+    if(t==='scr'||t==='pwmgen'||t==='opamp'||MC_SUBCKT[t]){map[c.id]='X'+(c.label||'');continue;}
     if(t.indexOf('custom_')===0){map[c.id]='X'+(c.label||'');continue;}
     if(passive.indexOf(t)>=0){map[c.id]=c.label||'';continue;}
   }
@@ -275,6 +275,12 @@ function currentVectorsForPin(comp,pinIdx){
   if(t==='scr'&&!comp.model){
     if(pinIdx===2)return null;                       // gate current not modelled
     return res(['i(v.'+ref+'.vsense)','@v.'+ref+'.vsense[i]'],pinIdx===0?1:-1);
+  }
+  if(t==='opamp'){
+    // Only the output current is observable: the default model's inputs are
+    // ideal (they carry just the 1T input resistor), so no probe for them.
+    if(pinIdx!==2)return null;
+    return res(['i(e.'+ref+'.e1)','@e.'+ref+'.e1[i]'],1);
   }
   if(t==='pwmgen'){
     // pins: IN, OUTH, COMH, OUTL, COML — the two output sources can be probed,
@@ -566,6 +572,21 @@ function mathBlockSubckt(name,c){
     'Rl1 IN1 0 1G','Rl2 IN2 0 1G','Rl3 IN3 0 1G',
     'Bo OUT 0 V = '+e,
     '.ends '+name
+  ];
+}
+
+// Op-amp "default" model: as ideal as a SPICE deck gets. A plain VCVS with
+// open-loop gain 1e7, ideal output (no Rout, no output limits, no supply pins)
+// and a 1T input resistor, which keeps the control nodes from floating.
+// No parameters, so one shared subcircuit serves every instance.
+var OPAMP_DEFAULT='opamp_default';
+function opampSubckt(){
+  return [
+    '* Op-amp default model: ideal VCVS, gain 1e7, no supply, no limits',
+    '.subckt '+OPAMP_DEFAULT+' INN INP OUT',
+    'Rin INP INN 1e12',
+    'E1 OUT 0 INP INN 1e7',
+    '.ends '+OPAMP_DEFAULT
   ];
 }
 
@@ -1090,6 +1111,22 @@ function generateNetlist(opts){
       lines.push(ref+' '+nets.join(' ')+' '+subname);
       continue;
     }
+    if(c.type==='opamp'){
+      var ref=refMap[c.id];
+      // Only the default model exists; any other Part name is noted and ignored.
+      pickModel(c.value,OPAMP_DEFAULT,{},modelNotes,ref);
+      var nets=[];
+      for(var pi=0;pi<def.pins.length;pi++){
+        var tp=xfPin(def.pins[pi].x,def.pins[pi].y,c.rot||0,c.mirror||false);
+        var nn=getNetNameWithTempNames(c.x+tp.x,c.y+tp.y);
+        // unwired pin: own node, so open pins of different parts never short
+        if(nn==='n000')nn='nc_'+ref.toLowerCase()+'_'+def.pins[pi].n.toLowerCase().replace(/[^a-z]/g,'');
+        nets.push(nn);
+      }
+      // pin order IN- IN+ OUT matches the subcircuit ports INN INP OUT
+      lines.push(ref+' '+nets.join(' ')+' '+OPAMP_DEFAULT);
+      continue;
+    }
     if(MC_SUBCKT[c.type]){
       var ref=refMap[c.id];
       var subname=c.type+'_'+ref.toLowerCase();
@@ -1193,6 +1230,11 @@ function generateNetlist(opts){
     lines.push('');
     lines.push('* MOSFET models (auto-sized from Rds(on))');
     for(var mi2=0;mi2<mosModels.length;mi2++)lines.push(mosModels[mi2]);
+  }
+  if(present.opamp){
+    var oa=opampSubckt();
+    lines.push('');
+    for(var ol=0;ol<oa.length;ol++)lines.push(oa[ol]);
   }
   for(var si2=0;si2<scrSubs.length;si2++){
     lines.push('');

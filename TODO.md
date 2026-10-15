@@ -32,3 +32,5 @@ Schriftgröße Markdown bei SVG-"Export"
 Allgemein SVG-Export checken - Viewport i.O.?
 
 Custom components im/export - globale Library
+
+Bug - Custom component scheint falsche Komponente zu ziehen

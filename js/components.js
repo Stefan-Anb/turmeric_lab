@@ -899,7 +899,7 @@ const CD={
     }
   },
   opamp:{
-    lbl:'U',val:'TL071',hitW:140,hitH:100,
+    lbl:'U',val:'default',hitW:140,hitH:100,
     props:{label:{l:'Reference'},value:{l:'Part'}},
     pins:[{x:-60,y:-20,n:'IN-'},{x:-60,y:20,n:'IN+'},{x:60,y:0,n:'OUT'}],
     draw(g,v){

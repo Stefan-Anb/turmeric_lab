@@ -1,6 +1,6 @@
 # TurmericLab: Code-Review und technische Dokumentation
 
-> Stand: 2026-10-08. Diese Datei dokumentiert die Codebasis, die verwendeten
+> Stand: 2026-10-15. Diese Datei dokumentiert die Codebasis, die verwendeten
 > mathematisch-algorithmischen Prinzipien, gefundene Inkonsistenzen sowie
 > Konzepte für eine generische Netzlistengenerierung und die Einbindung von
 > NGSpice-WASM. Es werden in diesem Dokument **keine** Code-Änderungen
@@ -225,7 +225,7 @@ zunächst feste Modellkarten und durchläuft dann `S.components` in einer große
 | nmos/pmos | `M<label> nD nG nS <model>` | VDMOS: `Mxxx nd ng ns model` (3 Pins) | Pinreihenfolge und 3-Pin-Form **korrekt** für VDMOS |
 | sw | `S<label> nA nB n(-) n(+) <model>` | `Sxxx N+ N- NC+ NC- model` | **Steuerknoten vertauscht** (3.2 #3) |
 | custom_* | `X<label> nets... <subname>` | `Xxxx nodes subckt` | ok, aber `.subckt`-Rumpf ist Platzhalter |
-| opamp | (keine Ausgabe) | bräuchte Subcircuit | **fehlt komplett** (3.2 #6) |
+| opamp *(neu 2026-10-15)* | `X<label> IN- IN+ OUT opamp_default` + gemeinsamer `.subckt` (VCVS) | `Xxxx nodes subckt` | ok; Idealmodell, siehe 3.4 |
 | zener *(neu 2026-08-14)* | `D<label> nA nK zm_<ref>` + eigene `.model … D(BV=…)` | `Dxxx n+ n- model` | ok; Durchbruchspannung je Instanz |
 | scr *(neu 2026-08-14)* | `X<label> nA nG nK scr_<ref>` + verhaltensbasierter `.subckt` | `Xxxx nodes subckt` | ok; Latch-Modell, siehe 3.4 |
 | pwmgen *(neu 2026-08-14)* | `X<label> IN OUTH COMH OUTL COML pwmgen_<ref>` + `.subckt` | `Xxxx nodes subckt` | ok; B-Source-Modell, siehe 3.4 |
@@ -282,6 +282,22 @@ Strommessung an diesen Subcircuits: NGSpice legt die Ströme der Bauteile
 *innerhalb* eines Subcircuits als `i(v.xscr1.vsense)` bzw. `i(b.xpwm1.bouth)`
 ab, darüber sind Anodenstrom (SCR) und Ausgangsströme (PWM, jeweils an OUTH/COMH
 und OUTL/COML) probebar.
+
+**Operationsverstärker (`opamp`, neu 2026-10-15).** Das Symbol hat nur drei Pins
+(IN-, IN+, OUT, keine Versorgung). Der Part-Name ist wie bei Dioden/Transistoren
+`default` und bedeutet das eingebaute Idealmodell `opamp_default` (`opampSubckt()`
+in `js/netlist.js`): `Rin INP INN 1e12` und `E1 OUT 0 INP INN 1e7`, also eine
+VCVS mit Leerlaufverstärkung 1e7, ohne Ausgangswiderstand, ohne
+Ausgangsbegrenzung, ohne Bandbreite. Der 1-TΩ-Eingangswiderstand verhindert nur
+schwebende Steuerknoten. Parameterlos, daher genau ein gemeinsamer `.subckt`, der
+nur emittiert wird, wenn ein opamp im Schaltplan liegt. Instanzzeile
+`X<label> IN- IN+ OUT opamp_default` (Portreihenfolge `INN INP OUT`); ein
+unverdrahteter Pin bekommt wie bei den Motor-Control-Blöcken einen eigenen Knoten
+`nc_<ref>_<pin>`. Ein anderer Part-Name (z. B. das frühere `TL071`) wird mit einer
+`* note:`-Zeile quittiert und ignoriert; echte Hersteller-Modelle sind (noch) nicht
+anbindbar. Probebar ist der Ausgangsstrom über `i(e.x<ref>.e1)`; die Eingänge
+nehmen im Idealfall keinen Strom auf und sind nicht probebar. Verifiziert: ein als
+Spannungsfolger verschalteter opamp an 1 V liefert 1 V am Ausgang (`.op`).
 
 Die 3-Pin-VDMOS-Form ist laut Manual gültig ("the fourth node of the vdmos
 instance can be removed"), siehe Quellen unten. Die NPN/PNP-Reihenfolge
@@ -418,8 +434,8 @@ Mikro-Zeichen `µ` (U+00B5), nicht das ASCII-`u`. NGSpice erwartet `10u`.
 Trailing `H` wird zwar ignoriert, aber `µ` wird nicht als Skalierungsfaktor
 erkannt. Gleiches Risiko bei beliebigen Werten, die der Nutzer mit `µ` eingibt.
 
-**#7 (mittel) opamp ohne Netzlistenausgabe.**
-opamp ist platzierbar, wird aber in `generateNetlist` durch keinen Zweig
+**#7 (mittel) opamp ohne Netzlistenausgabe. BEHOBEN 2026-10-15** (Default-Modell,
+siehe 3.4). Ursprünglicher Befund: opamp ist platzierbar, wird aber in `generateNetlist` durch keinen Zweig
 behandelt und fällt durch (`passive.indexOf('opamp') < 0 → continue`). Er
 verschwindet still aus der Netzliste. Mindestens ein Subcircuit-Stub wäre nötig.
 
