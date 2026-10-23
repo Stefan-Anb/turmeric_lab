@@ -21,9 +21,6 @@ Einbinden der Echtzeit-Simulation (mit Javscript-Code)
 * Fix der behavioural source (falsche Werte?!)
 
 Erweiterung der Blockschaltbild-Funktion
-* Blockdiagramm-Block
-* "Connectoren" für Bilder
-* Verbindungen farblich markieren und in verschiedenen dicken (3 reichen) anbieten
 * Evtl. Endpfeile
 
 Copy&Paste Daten in echte Zwischenablage übernehmen?
@@ -34,3 +31,11 @@ Allgemein SVG-Export checken - Viewport i.O.?
 Custom components im/export - globale Library
 
 Bug - Custom component scheint falsche Komponente zu ziehen
+
+Bug: Leere Pins in custom component werden angezeigt
+
+
+Modelle:
+Lithium-Ionen-Zelle
+Evtl. Einkanal-PWM
+Phasenanschnitt (normaler Puls + Multipuls) -> wahrscheinlich eher manuell bauen

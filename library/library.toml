@@ -17,7 +17,19 @@
 
 [library]
 name = "TurmericLab Schematic Library"
-version = "1.4.1"   # Version der gesamten Bibliothek, bei jeder Aenderung erhoehen
+version = "1.4.2"   # Version der gesamten Bibliothek, bei jeder Aenderung erhoehen
+
+[[schematic]]
+file = "thermische_simulation.svg"
+name = "Thermische Simulation"
+description = "Beispiel für die Simulation eines thermischen Systems mit SPICE."
+version = "1.0.0"
+
+[[schematic]]
+file = "linearregler_op.svg"
+name = "Linearregler mit OP"
+description = "Linearregler mit Feedback über eine Operationsverstärkerschaltung."
+version = "1.0.0"
 
 [[schematic]]
 file = "rc_lowpass.svg"           # Dateiname relativ zu library/
