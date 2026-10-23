@@ -715,6 +715,7 @@ function runSimulation(){
   var logEl=document.getElementById('sim-log');if(logEl)logEl.textContent='';
   refreshPowerFormulas();
   if(!simViewActive)setSimView(true);
+  setSimSec('config',false);setSimSec('signals',true);   // run started: config out of the way, signals in
   showSimPlotPlaceholder('Simulating…');
   var token=++simRunToken;
   simRunT0=(typeof performance!=='undefined'?performance.now():Date.now());
@@ -2904,14 +2905,17 @@ function addDiffProbe(x1,y1,x2,y2){
   _afterProbeChange();
 }
 
-// Clear really clears: no probes, no ticked vectors, nothing plotted (bar the
-// formulas, which have their own remove buttons). It deliberately does NOT fall
+// Clear really clears: no probes, no ticked vectors, formulas unticked (they
+// stay in the list, only their plot checkbox goes off). It deliberately does NOT fall
 // back to the automatic "all node voltages" set — that would look like the
 // button did nothing. Use selectAllNodeVoltages() to get that set back.
 function clearProbes(){
   S.probes=[];
   simSelection={};
   simSelectionAuto=false;
+  simFormulas.forEach(function(f){f.on=false;});
+  saveSimSettings();
+  renderFormulaList();
   _afterProbeChange();
 }
 
@@ -3020,14 +3024,11 @@ function toggleSimView(){
   setSimView(!simViewActive);
 }
 
-// The toolbar SIMULATION button: opens the view (same as toggleSimView) and,
-// only on that opening transition, kicks off a run right away — so a click
-// gets you straight to a result instead of open-then-hunt-for-Run. Re-clicking
-// to close (or to bring the settings page back) does not re-run.
+// The toolbar SIMULATION button: opens/closes the view (same as toggleSimView).
+// It does NOT start a run; the sidebar opens on the configuration and the RUN
+// button does the rest.
 function simulateButtonClick(){
-  var wasActive=simViewActive;
   toggleSimView();
-  if(!wasActive)runSimulation();
 }
 
 function setSimView(on){
@@ -3052,16 +3053,24 @@ function setSimPanel(on){
     var pc=document.getElementById('props-content');if(pc)pc.style.display='none';
     var cc=document.getElementById('custom-comp-section');if(cc)cc.style.display='none';
     settings.style.display='block';
+    setPropsTitle('NGSpice Simulation',true);
     renderAnalysisPanel();
     renderFormulaList();
     renderProbeList();
     renderMeasureList();
   }else{
     settings.style.display='none';
+    setPropsTitle('Properties',false);
     if(typeof renderProps==='function')renderProps(); // restore the normal properties view
   }
 }
 
+// The sidebar heading doubles as the simulation panel's title while it is open.
+function setPropsTitle(text,simOpen){
+  var t=document.getElementById('props-title');if(t)t.textContent=text;
+  var c=document.getElementById('props-close');if(c)c.style.display=simOpen?'':'none';
+  var pp=document.getElementById('propspanel');if(pp)pp.classList.toggle('sim-open',!!simOpen);
+}
 function closeSimPanel(){ setSimPanel(false); }
 // Re-open the settings page from the plot pane header without touching the plot.
 function showSimPanel(){ setSimPanel(true); }
@@ -3098,19 +3107,16 @@ function showSimPanel(){ setSimPanel(true); }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',attach);else attach();
 })();
 
-// Analysis type / directives: folded away by default, since day-to-day work is
-// mostly about probing signals, not re-configuring the analysis card. Session-
-// only (not persisted) — it's a display preference, not part of the sim setup.
-var simConfigCollapsed=true;
-function toggleSimConfigCollapse(){
-  simConfigCollapsed=!simConfigCollapsed;
-  applySimConfigCollapse();
+// Collapsible sections of the simulation sidebar (all share one style). Open/
+// closed state is session-only, a display preference. Defaults: configuration
+// open, everything else closed; starting a run swaps config for the signals.
+function toggleSimSec(id){
+  var el=document.getElementById('sim-sec-'+id);
+  if(el)el.classList.toggle('open');
 }
-function applySimConfigCollapse(){
-  var body=document.getElementById('sim-config-body');
-  var caret=document.getElementById('sim-config-caret');
-  if(body)body.style.display=simConfigCollapsed?'none':'block';
-  if(caret)caret.textContent=simConfigCollapsed?'▸':'▾';
+function setSimSec(id,open){
+  var el=document.getElementById('sim-sec-'+id);
+  if(el)el.classList.toggle('open',!!open);
 }
 
 // ═══ INIT ═══
@@ -3123,7 +3129,6 @@ function applySimConfigCollapse(){
     renderFormulaList();
     renderProbeList();
     renderMeasureList();
-    applySimConfigCollapse();
     setRunButtonState('ready');
     // Preload the WASM engine (worker if it works here, main thread otherwise)
     // right away instead of waiting for the first Run, so that click doesn't

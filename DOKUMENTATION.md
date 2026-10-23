@@ -1,6 +1,6 @@
 # TurmericLab: Code-Review und technische Dokumentation
 
-> Stand: 2026-10-15. Diese Datei dokumentiert die Codebasis, die verwendeten
+> Stand: 2026-10-23. Diese Datei dokumentiert die Codebasis, die verwendeten
 > mathematisch-algorithmischen Prinzipien, gefundene Inkonsistenzen sowie
 > Konzepte für eine generische Netzlistengenerierung und die Einbindung von
 > NGSpice-WASM. Es werden in diesem Dokument **keine** Code-Änderungen
@@ -1391,6 +1391,24 @@ gesweept, Anstiegszeit ueber R im Report-Plot).
 
 ## 11a. Simulation: Fortschritt, .ac und .measure
 
+- **Topbar kompakt.** Buttons heissen "NEW" und "LIBRARY". Die SPICE-Statuszeile
+  (`#sim-status`, Klasse `.sim-status-compact`, weiterhin von `simStatus()`
+  beschrieben) sitzt rechtsbuendig in der Footbar. Unter 1200 px Fensterbreite
+  blendet eine Media-Query `.mode-indicator` ("MODE: ...") und die Texte der
+  Modus-Buttons (`.tb-lbl`) aus, nur die Icons bleiben; so bleibt der
+  SIMULATION-Button ab ca. 1000 px sichtbar. Der Netlist-Button ("Show netlist")
+  liegt im Simulation-Panel der Sidebar, das Logo ist verkleinert.
+- **Simulations-Sidebar.** Alle Inhalte stecken in gleich gestalteten, einklappbaren
+  Sektionen (`.sim-sec` mit `.sim-sec-hdr`/`.sim-sec-body`, Zustand per
+  `toggleSimSec(id)`/`setSimSec(id,open)`, nur Session): Configuration (inkl.
+  "Save & list all signals"), Signals (Plotted signals, Result vectors,
+  Formulas), Measurements, NGSpice log / netlist (inkl. "Show netlist").
+  Standard: nur Configuration offen. `runSimulation()` klappt Configuration zu
+  und Signals auf. Der SIMULATION-Button startet keinen Lauf mehr. Die
+  Ueberschrift "Properties" wird beim Oeffnen durch "NGSpice Simulation" ersetzt
+  (`setPropsTitle()`, mit Schliessen-Button) und beim Schliessen zurueckgesetzt.
+  "Clear selection" (`clearProbes()`) haekelt zusaetzlich alle Formeln ab
+  (`on=false`); sie bleiben in der Liste.
 - **Sweep-Fortschritt.** `simStatus(msg,pct)` faerbt den Statusstreifen als
   Fortschrittsbalken (CSS-Variable `--pct`). Waehrend eines Sweeps zeigt der
   Ticker (`startSimTicker()`) "Step i/n · % · ~Restzeit". Die Engine meldet

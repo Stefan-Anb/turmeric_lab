@@ -15,22 +15,22 @@
   <div class="app-title" id="app-logo" onclick="showAbout()" title="About TurmericLab">TURMERIC<span>LAB</span></div>
   <div class="tb-sep"></div>
   <button class="tb-btn active" id="btn-select" onclick="setMode('select')">
-    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 1L1 9L4 7L6 11L7.5 10.5L5.5 6.5L9 6Z" stroke="currentColor" stroke-width="1" fill="currentColor" opacity=".7"/></svg>SELECT
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 1L1 9L4 7L6 11L7.5 10.5L5.5 6.5L9 6Z" stroke="currentColor" stroke-width="1" fill="currentColor" opacity=".7"/></svg><span class="tb-lbl">SELECT</span>
   </button>
   <button class="tb-btn" id="btn-wire" onclick="setMode('wire')">
-    <svg width="12" height="12" viewBox="0 0 12 12"><polyline points="1,6 4,6 4,3 8,3 8,6 11,6" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>WIRE
+    <svg width="12" height="12" viewBox="0 0 12 12"><polyline points="1,6 4,6 4,3 8,3 8,6 11,6" stroke="currentColor" stroke-width="1.5" fill="none"/></svg><span class="tb-lbl">WIRE</span>
   </button>
   <button class="tb-btn" id="btn-probe" onclick="setMode('probe')">
-    <svg width="12" height="12" viewBox="0 0 12 12"><path d="M4 1h4l2 5-2 5H4l-2-5 2-5z" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>PROBE
+    <svg width="12" height="12" viewBox="0 0 12 12"><path d="M4 1h4l2 5-2 5H4l-2-5 2-5z" stroke="currentColor" stroke-width="1.5" fill="none"/></svg><span class="tb-lbl">PROBE</span>
   </button>
   <button class="tb-btn" id="btn-delete" onclick="deleteSelected()">
-    <svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 3h8M5 3V2h2v1M4 3l.5 7h3L8 3" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>DELETE
+    <svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 3h8M5 3V2h2v1M4 3l.5 7h3L8 3" stroke="currentColor" stroke-width="1.2" fill="none"/></svg><span class="tb-lbl">DELETE</span>
   </button>
   <div class="tb-sep"></div>
-  <button class="tb-btn" onclick="newSchematic()" title="Start an empty schematic. The current one stays in the internal library.">NEW SCHEMATIC</button>
+  <button class="tb-btn" onclick="newSchematic()" title="Start an empty schematic. The current one stays in the internal library.">NEW</button>
   <button class="tb-btn" onclick="exportSVG()">SAVE</button>
   <button class="tb-btn" onclick="importSVG()">LOAD</button>
-  <button class="tb-btn" onclick="showLibrary()" title="Browse internal (browser) and global (project) schematics">SCHEMATIC LIBRARY</button>
+  <button class="tb-btn" onclick="showLibrary()" title="Browse internal (browser) and global (project) schematics">LIBRARY</button>
   <div class="tb-sep"></div>
   <button class="tb-btn" onclick="zoomToFit()">
     <svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 4V1h3M8 1h3v3M11 8v3H8M4 11H1V8" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>ZOOM FIT
@@ -38,8 +38,6 @@
   <div class="mode-indicator">MODE: <span id="mode-label">SELECT</span></div>
   <div class="tb-sim-group">
     <button class="tb-btn" onclick="showParamsDialog()" title="Parameters: named values for {name} in value fields, optionally swept for families of curves">PARAMS</button>
-    <button class="tb-btn" onclick="showNetlist()">NETLIST</button>
-    <span id="sim-status" class="sim-status-compact" title="Idle.">Idle.</span>
     <button id="sim-run-btn" class="tb-btn tb-btn-run state-ready" title="Run the simulation"><span id="sim-run-icon" class="tb-run-icon">▶</span><span id="sim-run-label">RUN</span></button>
     <button class="tb-btn tb-btn-sim" id="btn-sim" onclick="simulateButtonClick()">SIMULATION</button>
   </div>
@@ -240,7 +238,9 @@
   </div>
 
   <div id="propspanel">
-    <div class="props-header">Properties</div>
+    <div class="props-header" id="props-header"><span id="props-title">Properties</span>
+      <button id="props-close" class="modal-close" style="display:none" onclick="closeSimPanel()" title="Close simulation settings (component properties stay reachable)">&times;</button>
+    </div>
     <div id="props-content"><div class="props-empty">Select a component<br>to edit its properties</div></div>
 <div id="custom-comp-section" style="display:none">
       <div class="props-header cc-section-header" style="border-top:1px solid var(--border);margin-top:12px;padding-top:12px">
@@ -283,14 +283,9 @@
       </div>
     </div>
     <div id="sim-settings" style="display:none">
-      <div class="props-header sim-settings-header">NGSpice Simulation
-        <button class="modal-close" onclick="closeSimPanel()" title="Close simulation settings (component properties stay reachable)">&times;</button>
-      </div>
-      <div class="sim-row">
-        <div class="sim-label sim-collapsible-hdr" id="sim-config-hdr" onclick="toggleSimConfigCollapse()">
-          <span id="sim-config-caret">▸</span> Simulation configuration
-        </div>
-        <div id="sim-config-body" style="display:none">
+      <div class="sim-sec open" id="sim-sec-config">
+        <div class="sim-sec-hdr" onclick="toggleSimSec('config')"><span class="sim-sec-caret">▸</span>Simulation configuration</div>
+        <div class="sim-sec-body">
           <div class="sim-field-block">
             <label class="sim-label">Analysis</label>
             <select id="sim-analysis-type" class="sim-select" onchange="onAnalysisTypeChange(this)">
@@ -307,33 +302,45 @@
             <label class="sim-label">Additional directives <span class="sim-sub">(.model, .ic, .options, .ac …)</span></label>
             <textarea id="sim-directives" class="sim-directives" spellcheck="false"></textarea>
           </div>
+          <div class="sim-field-block">
+            <label class="sim-check"><input type="checkbox" id="sim-raw-mode" checked onchange="onRawModeChange()"> Save &amp; list all signals <span class="sim-sub">(saves every device terminal current, so it can be picked afterwards)</span></label>
+          </div>
         </div>
       </div>
-      <div class="sim-row">
-        <label class="sim-label">Plotted signals <span class="sim-sub">(probe mode P: pin = current, wire = voltage, drag = differential)</span></label>
-        <div id="sim-probe-list" class="sim-probe-list"></div>
-        <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
-          <button class="tb-btn" style="font-size:10px;padding:3px 8px" onclick="clearProbes()" title="Plot nothing until you probe or tick a signal">Clear selection</button>
-          <button class="tb-btn" style="font-size:10px;padding:3px 8px" onclick="selectAllNodeVoltages()" title="Plot every node voltage of the schematic">All node voltages</button>
-          <button class="tb-btn" style="font-size:10px;padding:3px 8px" onclick="selectAllSignals()" title="Plot every vector of the last run, currents included">All signals</button>
+      <div class="sim-sec" id="sim-sec-signals">
+        <div class="sim-sec-hdr" onclick="toggleSimSec('signals')"><span class="sim-sec-caret">▸</span>Signals</div>
+        <div class="sim-sec-body">
+          <label class="sim-label">Plotted signals <span class="sim-sub">(probe mode P: pin = current, wire = voltage, drag = differential)</span></label>
+          <div id="sim-probe-list" class="sim-probe-list"></div>
+          <div class="sim-btn-row">
+            <button class="tb-btn sim-mini-btn" onclick="clearProbes()" title="Plot nothing until you probe or tick a signal (formulas are unticked, not removed)">Clear selection</button>
+            <button class="tb-btn sim-mini-btn" onclick="selectAllNodeVoltages()" title="Plot every node voltage of the schematic">All node voltages</button>
+            <button class="tb-btn sim-mini-btn" onclick="selectAllSignals()" title="Plot every vector of the last run, currents included">All signals</button>
+          </div>
+          <div id="sim-raw-panel" class="sim-raw-panel" style="display:none"></div>
+          <label class="sim-label sim-sub-label">Formulas <span class="sim-sub">(e.g. <code>V(out)-V(in)</code>, <code>V(out)*I(R1)</code>)</span></label>
+          <div id="sim-formula-list" class="sim-formula-list"></div>
+          <div class="sim-btn-row"><button class="tb-btn sim-mini-btn" onclick="addFormula()">+ Add formula</button></div>
         </div>
       </div>
-      <div class="sim-row">
-        <label class="sim-label">Formulas <span class="sim-sub">(e.g. <code>V(out)-V(in)</code>, <code>V(out)*I(R1)</code>)</span></label>
-        <div id="sim-formula-list" class="sim-formula-list"></div>
-        <button class="tb-btn" style="margin-top:6px;font-size:10px;padding:3px 8px;align-self:flex-start" onclick="addFormula()">+ Add formula</button>
+      <div class="sim-sec" id="sim-sec-measure">
+        <div class="sim-sec-hdr" onclick="toggleSimSec('measure')"><span class="sim-sec-caret">▸</span>Measurements</div>
+        <div class="sim-sec-body">
+          <label class="sim-label">.measure <span class="sim-sub">(delays, thresholds, range statistics)</span></label>
+          <div id="sim-measure-list" class="sim-measure-list"></div>
+          <div class="sim-btn-row">
+            <button id="sim-measure-add-btn" class="tb-btn sim-mini-btn" onclick="openMeasureModal(-1)">+ Add measurement</button>
+            <button class="tb-btn sim-mini-btn" onclick="showMeasureReport()" title="All measurements with their settings and results as a table">Measurement Report</button>
+          </div>
+        </div>
       </div>
-      <div class="sim-row">
-        <label class="sim-label">Measurements <span class="sim-sub">(.measure — delays, thresholds, range statistics)</span></label>
-        <div id="sim-measure-list" class="sim-measure-list"></div>
-        <button id="sim-measure-add-btn" class="tb-btn" style="margin-top:6px;font-size:10px;padding:3px 8px;align-self:flex-start" onclick="openMeasureModal(-1)">+ Add measurement</button>
-        <button class="tb-btn" style="margin-top:6px;font-size:10px;padding:3px 8px;align-self:flex-start" onclick="showMeasureReport()" title="All measurements with their settings and results as a table">Measurement Report</button>
+      <div class="sim-sec" id="sim-sec-log">
+        <div class="sim-sec-hdr" onclick="toggleSimSec('log')"><span class="sim-sec-caret">▸</span>NGSpice log / netlist</div>
+        <div class="sim-sec-body">
+          <div class="sim-btn-row"><button class="tb-btn sim-mini-btn" onclick="showNetlist()" title="Show the generated SPICE netlist">Show netlist</button></div>
+          <pre id="sim-log" class="sim-log"></pre>
+        </div>
       </div>
-      <div class="sim-row">
-        <label class="sim-check"><input type="checkbox" id="sim-raw-mode" checked onchange="onRawModeChange()"> Save &amp; list all signals <span class="sim-sub">(saves every device terminal current, so it can be picked afterwards)</span></label>
-      </div>
-      <div id="sim-raw-panel" class="sim-raw-panel" style="display:none"></div>
-      <details class="sim-log-wrap"><summary>NGSpice log / netlist</summary><pre id="sim-log" class="sim-log"></pre></details>
     </div>
   </div>
 </div>
@@ -345,6 +352,7 @@
   <div class="sb-item">Comp: <span id="sb-comps">0</span></div>
   <div class="sb-item">Wires: <span id="sb-wires">0</span></div>
   <div class="sb-item" id="sb-hint">Select a component or press W for wire</div>
+  <div class="sb-item sim-status-compact" id="sim-status" title="Idle.">Idle.</div>
 </div>
 
 <div id="netlist-modal" class="modal" style="display:none">

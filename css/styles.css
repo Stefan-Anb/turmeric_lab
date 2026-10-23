@@ -11,14 +11,14 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg-deep);}
 body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);display:flex;flex-direction:column;}
 
 #toolbar{height:44px;background:var(--bg-panel);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 12px;gap:6px;flex-shrink:0;user-select:none;}
-.app-title{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--accent);letter-spacing:2px;margin-right:18px;white-space:nowrap;}
+.app-title{font-family:'Share Tech Mono',monospace;font-size:13px;color:var(--accent);letter-spacing:1px;margin-right:6px;white-space:nowrap;}
 .app-title span{color:var(--text-mid);}
 .app-title{cursor:pointer;}
 .about-table{border-collapse:collapse;margin:4px 0;font-size:12px;}
 .about-table td{padding:3px 12px 3px 0;color:var(--text-hi);}
 .about-table td:first-child{color:var(--text-lo);}
 .tb-sep{width:1px;height:24px;background:var(--border);margin:0 6px;}
-.tb-btn{height:30px;padding:0 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:3px;color:var(--text-mid);font-family:'Rajdhani',sans-serif;font-size:12px;font-weight:600;letter-spacing:.5px;cursor:pointer;transition:all .15s;display:flex;align-items:center;gap:5px;}
+.tb-btn{white-space:nowrap;height:30px;padding:0 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:3px;color:var(--text-mid);font-family:'Rajdhani',sans-serif;font-size:12px;font-weight:600;letter-spacing:.5px;cursor:pointer;transition:all .15s;display:flex;align-items:center;gap:5px;}
 .tb-btn:hover{border-color:var(--border-hi);color:var(--text-hi);background:var(--bg-hover);}
 .tb-btn.active{border-color:var(--accent);color:var(--accent);background:#00c8ff12;}
 .mode-indicator{font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--text-lo);letter-spacing:1px;}
@@ -26,7 +26,9 @@ body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);displ
 /* Run + status + Simulation, grouped and pinned to the toolbar's right edge —
    the whole entry point into the simulation view lives in one place. */
 .tb-sim-group{margin-left:auto;display:flex;align-items:center;gap:8px;}
-.sim-status-compact{font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--text-mid);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:340px;}
+/* Narrow windows: drop the mode readout and the mode-button captions (icons stay) */
+@media (max-width:1200px){.mode-indicator{display:none;}.tb-lbl{display:none;}}
+.sim-status-compact{font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--text-mid);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .tb-btn-run{border-color:var(--accent-dim);}
 .tb-btn-run:disabled{opacity:.5;cursor:default;pointer-events:none;}
 .tb-run-icon{font-size:10px;line-height:1;}
@@ -86,7 +88,7 @@ body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);displ
 #propspanel::-webkit-scrollbar-thumb{background:var(--border-hi);border-radius:2px;}
 #propspanel-resizer{width:6px;position:absolute;left:-3px;top:0;bottom:0;cursor:ew-resize;z-index:10;}
 #propspanel-resizer:hover,#propspanel-resizer.dragging{background:var(--accent-dim);}
-.props-header{padding:10px 12px 8px;font-size:9px;font-weight:700;letter-spacing:2px;color:var(--text-lo);text-transform:uppercase;border-bottom:1px solid var(--border);flex-shrink:0;}
+.props-header{display:flex;align-items:center;justify-content:space-between;padding:10px 12px 8px;font-size:9px;font-weight:700;letter-spacing:2px;color:var(--text-lo);text-transform:uppercase;border-bottom:1px solid var(--border);flex-shrink:0;}
 .props-empty{padding:20px 12px;color:var(--text-lo);font-size:11px;font-style:italic;text-align:center;line-height:1.8;}
 .props-badge{margin:12px 12px 8px;padding:4px 8px;background:var(--bg-card);border:1px solid var(--border-hi);border-radius:3px;font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--accent);letter-spacing:1px;}
 .prop-row{padding:6px 12px;display:flex;flex-direction:column;gap:3px;border-bottom:1px solid #1a2028;}
@@ -199,6 +201,8 @@ body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);displ
 #statusbar{height:24px;background:var(--bg-panel);border-top:1px solid var(--border);display:flex;align-items:center;padding:0 12px;gap:20px;flex-shrink:0;}
 .sb-item{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--text-lo);letter-spacing:.5px;}
 .sb-item span{color:var(--text-mid);}
+/* SPICE status lives at the right end of the footbar; shrinks/truncates when space is short */
+#statusbar .sim-status-compact{margin-left:auto;min-width:0;flex:0 1 auto;font-size:10px;letter-spacing:.5px;color:var(--text-mid);}
 
 .dialog-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:#0008;display:flex;align-items:center;justify-content:center;z-index:1000;}
 .dialog{background:var(--bg-panel);border:1px solid var(--border-hi);border-radius:6px;width:420px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 8px 32px #0008;}
@@ -242,8 +246,22 @@ body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);displ
 
 /* ═══ Simulation settings (in properties panel) + plot ═══ */
 #sim-settings{display:flex;flex-direction:column;}
-#sim-settings .props-header{color:var(--accent);}
+#propspanel.sim-open #props-header{color:var(--accent);}
+#props-close{font-size:18px;line-height:1;}
 .sim-row{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-bottom:1px solid var(--border);}
+/* Collapsible sections of the simulation sidebar: one uniform style */
+.sim-sec{border-bottom:1px solid var(--border);}
+.sim-sec-hdr{display:flex;align-items:center;gap:6px;padding:9px 12px;font-size:10px;font-weight:700;letter-spacing:1px;color:var(--text-mid);text-transform:uppercase;cursor:pointer;user-select:none;}
+.sim-sec-hdr:hover{color:var(--text-hi);}
+.sim-sec-caret{display:inline-block;width:10px;transition:transform .12s;}
+.sim-sec.open>.sim-sec-hdr{color:var(--accent);}
+.sim-sec.open .sim-sec-caret{transform:rotate(90deg);}
+.sim-sec-body{display:none;flex-direction:column;gap:6px;padding:0 12px 12px;}
+.sim-sec.open>.sim-sec-body{display:flex;}
+.sim-sec-body .sim-field-block:first-child{margin-top:0;}
+.sim-sub-label{margin-top:8px;}
+.sim-btn-row{display:flex;gap:6px;flex-wrap:wrap;}
+.sim-mini-btn{font-size:10px;padding:3px 8px;}
 .sim-label{font-size:10px;font-weight:700;letter-spacing:1px;color:var(--text-lo);text-transform:uppercase;}
 .sim-sub{font-weight:400;letter-spacing:0;text-transform:none;color:var(--text-mid);}
 .sim-directives{background:var(--bg-card);border:1px solid var(--border);border-radius:3px;color:var(--text-hi);font-family:'Share Tech Mono',monospace;font-size:12px;padding:8px;resize:vertical;width:100%;min-height:48px;outline:none;}
@@ -258,7 +276,7 @@ body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);displ
 .sim-plot{flex:1;width:100%;min-height:60px;overflow:hidden;}
 .sim-log-wrap{border:1px solid var(--border);border-radius:3px;}
 .sim-log-wrap summary{cursor:pointer;padding:6px 10px;font-size:11px;color:var(--text-mid);letter-spacing:1px;text-transform:uppercase;}
-.sim-log{margin:0;padding:8px 10px;max-height:180px;overflow:auto;background:var(--bg-card);color:var(--text-mid);font-family:'Share Tech Mono',monospace;font-size:11px;white-space:pre-wrap;word-break:break-word;}
+.sim-log{margin:0;padding:8px 10px;min-height:40px;border:1px solid var(--border);border-radius:3px;max-height:180px;overflow:auto;background:var(--bg-card);color:var(--text-mid);font-family:'Share Tech Mono',monospace;font-size:11px;white-space:pre-wrap;word-break:break-word;}
 .sim-table{width:100%;border-collapse:collapse;font-family:'Share Tech Mono',monospace;font-size:12px;}
 .sim-table th,.sim-table td{border:1px solid var(--border);padding:4px 8px;text-align:left;color:var(--text-hi);}
 .sim-table th{color:var(--text-lo);font-size:10px;letter-spacing:1px;text-transform:uppercase;}
@@ -268,11 +286,10 @@ body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);displ
 .sim-plot .u-title{color:var(--text-hi);}
 /* Visible drag-to-zoom selection preview (default is near-invisible on dark bg) */
 .sim-plot .u-select{background:#00c8ff26;border:1px solid var(--accent);}
-.sim-log-wrap{margin:10px 12px;}
 .sim-check{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-mid);cursor:pointer;}
 .sim-check input{accent-color:var(--accent);}
-.sim-raw-panel{border:1px solid var(--border);border-radius:3px;padding:8px 10px;background:var(--bg-card);}
-.sim-raw-toggle{cursor:pointer;user-select:none;}
+.sim-raw-panel{margin-top:4px;}
+.sim-raw-toggle{cursor:pointer;user-select:none;margin-top:8px;}
 .sim-raw-toggle:hover{color:var(--text-hi);}
 .sim-collapsible-hdr{cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px;}
 .sim-collapsible-hdr:hover{color:var(--text-hi);}
