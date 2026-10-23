@@ -280,7 +280,7 @@ function currentVectorsForPin(comp,pinIdx){
     // Only the output current is observable: the default model's inputs are
     // ideal (they carry just the 1T input resistor), so no probe for them.
     if(pinIdx!==2)return null;
-    return res(['i(e.'+ref+'.e1)','@e.'+ref+'.e1[i]'],1);
+    return res(['i(b.'+ref+'.b1)','@b.'+ref+'.b1[i]'],1);
   }
   if(t==='pwmgen'){
     // pins: IN, OUTH, COMH, OUTL, COML — the two output sources can be probed,
@@ -575,18 +575,20 @@ function mathBlockSubckt(name,c){
   ];
 }
 
-// Op-amp "default" model: as ideal as a SPICE deck gets. A plain VCVS with
-// open-loop gain 1e7, ideal output (no Rout, no output limits, no supply pins)
-// and a 1T input resistor, which keeps the control nodes from floating.
-// No parameters, so one shared subcircuit serves every instance.
-var OPAMP_DEFAULT='opamp_default';
-function opampSubckt(){
+// Op-amp "default" model: as ideal as a SPICE deck gets. Open-loop gain 1e7,
+// ideal output (no Rout, no supply pins) and a 1T input resistor, which keeps
+// the control nodes from floating. The output is limited symmetrically to
+// ±vlim by a smooth tanh() (a hard min/max kink would upset the solver); the
+// small-signal gain around 0 stays 1e7. One subcircuit per instance, the limit
+// is inlined as a literal/expression (same approach as the PWM generator).
+function opampSubckt(name,c){
+  var vl=String(c.vlim==null||String(c.vlim).trim()===''?'15':c.vlim).trim();
   return [
-    '* Op-amp default model: ideal VCVS, gain 1e7, no supply, no limits',
-    '.subckt '+OPAMP_DEFAULT+' INN INP OUT',
+    '* Op-amp default model ('+name+'): gain 1e7, output limited to +-'+vl+' V',
+    '.subckt '+name+' INN INP OUT',
     'Rin INP INN 1e12',
-    'E1 OUT 0 INP INN 1e7',
-    '.ends '+OPAMP_DEFAULT
+    "B1 OUT 0 V='("+vl+")*tanh(1e7*(v(INP)-v(INN))/("+vl+"))'",
+    '.ends '+name
   ];
 }
 
@@ -871,6 +873,7 @@ function generateNetlist(opts){
   var zenerModels=[];   // per-instance .model cards for Z-diodes
   var pwmSubs=[];       // per-instance PWM generator subcircuits
   var scrSubs=[];       // per-instance thyristor subcircuits
+  var opampSubs=[];     // per-instance op-amp subcircuits (output limit inlined)
   var mcSubs=[];        // per-instance motor-control block subcircuits
   var mosModels=[];     // per-instance .model cards for MOSFETs (sized from Rds(on))
   // Determine which component classes are actually present, so we only emit
@@ -1114,7 +1117,9 @@ function generateNetlist(opts){
     if(c.type==='opamp'){
       var ref=refMap[c.id];
       // Only the default model exists; any other Part name is noted and ignored.
-      pickModel(c.value,OPAMP_DEFAULT,{},modelNotes,ref);
+      pickModel(c.value,'opamp_'+ref.toLowerCase(),{},modelNotes,ref);
+      var subname='opamp_'+ref.toLowerCase();
+      opampSubs.push(opampSubckt(subname,c));
       var nets=[];
       for(var pi=0;pi<def.pins.length;pi++){
         var tp=xfPin(def.pins[pi].x,def.pins[pi].y,c.rot||0,c.mirror||false);
@@ -1124,7 +1129,7 @@ function generateNetlist(opts){
         nets.push(nn);
       }
       // pin order IN- IN+ OUT matches the subcircuit ports INN INP OUT
-      lines.push(ref+' '+nets.join(' ')+' '+OPAMP_DEFAULT);
+      lines.push(ref+' '+nets.join(' ')+' '+subname);
       continue;
     }
     if(MC_SUBCKT[c.type]){
@@ -1231,10 +1236,9 @@ function generateNetlist(opts){
     lines.push('* MOSFET models (auto-sized from Rds(on))');
     for(var mi2=0;mi2<mosModels.length;mi2++)lines.push(mosModels[mi2]);
   }
-  if(present.opamp){
-    var oa=opampSubckt();
+  for(var oi=0;oi<opampSubs.length;oi++){
     lines.push('');
-    for(var ol=0;ol<oa.length;ol++)lines.push(oa[ol]);
+    for(var ol=0;ol<opampSubs[oi].length;ol++)lines.push(opampSubs[oi][ol]);
   }
   for(var si2=0;si2<scrSubs.length;si2++){
     lines.push('');

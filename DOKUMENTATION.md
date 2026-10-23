@@ -225,7 +225,7 @@ zunächst feste Modellkarten und durchläuft dann `S.components` in einer große
 | nmos/pmos | `M<label> nD nG nS <model>` | VDMOS: `Mxxx nd ng ns model` (3 Pins) | Pinreihenfolge und 3-Pin-Form **korrekt** für VDMOS |
 | sw | `S<label> nA nB n(-) n(+) <model>` | `Sxxx N+ N- NC+ NC- model` | **Steuerknoten vertauscht** (3.2 #3) |
 | custom_* | `X<label> nets... <subname>` | `Xxxx nodes subckt` | ok, aber `.subckt`-Rumpf ist Platzhalter |
-| opamp *(neu 2026-10-15)* | `X<label> IN- IN+ OUT opamp_default` + gemeinsamer `.subckt` (VCVS) | `Xxxx nodes subckt` | ok; Idealmodell, siehe 3.4 |
+| opamp *(neu 2026-10-15)* | `X<label> IN- IN+ OUT opamp_<ref>` + `.subckt` pro Instanz (B-Source mit tanh-Begrenzung `vlim`) | `Xxxx nodes subckt` | ok; Idealmodell, siehe 3.4 |
 | zener *(neu 2026-08-14)* | `D<label> nA nK zm_<ref>` + eigene `.model … D(BV=…)` | `Dxxx n+ n- model` | ok; Durchbruchspannung je Instanz |
 | scr *(neu 2026-08-14)* | `X<label> nA nG nK scr_<ref>` + verhaltensbasierter `.subckt` | `Xxxx nodes subckt` | ok; Latch-Modell, siehe 3.4 |
 | pwmgen *(neu 2026-08-14)* | `X<label> IN OUTH COMH OUTL COML pwmgen_<ref>` + `.subckt` | `Xxxx nodes subckt` | ok; B-Source-Modell, siehe 3.4 |
@@ -285,19 +285,23 @@ und OUTL/COML) probebar.
 
 **Operationsverstärker (`opamp`, neu 2026-10-15).** Das Symbol hat nur drei Pins
 (IN-, IN+, OUT, keine Versorgung). Der Part-Name ist wie bei Dioden/Transistoren
-`default` und bedeutet das eingebaute Idealmodell `opamp_default` (`opampSubckt()`
-in `js/netlist.js`): `Rin INP INN 1e12` und `E1 OUT 0 INP INN 1e7`, also eine
-VCVS mit Leerlaufverstärkung 1e7, ohne Ausgangswiderstand, ohne
-Ausgangsbegrenzung, ohne Bandbreite. Der 1-TΩ-Eingangswiderstand verhindert nur
-schwebende Steuerknoten. Parameterlos, daher genau ein gemeinsamer `.subckt`, der
-nur emittiert wird, wenn ein opamp im Schaltplan liegt. Instanzzeile
-`X<label> IN- IN+ OUT opamp_default` (Portreihenfolge `INN INP OUT`); ein
+`default` und bedeutet das eingebaute Idealmodell (`opampSubckt()` in
+`js/netlist.js`): `Rin INP INN 1e12` und
+`B1 OUT 0 V='(vlim)*tanh(1e7*(v(INP)-v(INN))/(vlim))'`, also Leerlaufverstärkung
+1e7 um null, ohne Ausgangswiderstand, ohne Bandbreite, Ausgang symmetrisch auf
+±`vlim` begrenzt. Die Begrenzung ist bewusst ein glattes `tanh()` statt hartem
+`min/max` (ein Knick im B-Source-Ausdruck stört den Solver, vgl. PWM-Flanken).
+Der 1-TΩ-Eingangswiderstand verhindert nur schwebende Steuerknoten.
+*Property `vlim`* ("Output limit ± (V)", Default 15, leer = 15): wird wie beim
+PWM-Generator als Literal bzw. Ausdruck (auch Parametername) in den Subcircuit
+eingesetzt, daher ein `.subckt opamp_<ref>` pro Instanz, nur für vorhandene opamps.
+Instanzzeile `X<label> IN- IN+ OUT opamp_<ref>` (Portreihenfolge `INN INP OUT`); ein
 unverdrahteter Pin bekommt wie bei den Motor-Control-Blöcken einen eigenen Knoten
 `nc_<ref>_<pin>`. Ein anderer Part-Name (z. B. das frühere `TL071`) wird mit einer
 `* note:`-Zeile quittiert und ignoriert; echte Hersteller-Modelle sind (noch) nicht
-anbindbar. Probebar ist der Ausgangsstrom über `i(e.x<ref>.e1)`; die Eingänge
-nehmen im Idealfall keinen Strom auf und sind nicht probebar. Verifiziert: ein als
-Spannungsfolger verschalteter opamp an 1 V liefert 1 V am Ausgang (`.op`).
+anbindbar. Probebar ist der Ausgangsstrom über `i(b.x<ref>.b1)`; die Eingänge
+nehmen im Idealfall keinen Strom auf und sind nicht probebar. Verifiziert (`.op`):
+Spannungsfolger an 1 V liefert 1 V bei `vlim`=15 und 0,5 V bei `vlim`=0,5.
 
 Die 3-Pin-VDMOS-Form ist laut Manual gültig ("the fourth node of the vdmos
 instance can be removed"), siehe Quellen unten. Die NPN/PNP-Reihenfolge

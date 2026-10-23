@@ -900,7 +900,7 @@ const CD={
   },
   opamp:{
     lbl:'U',val:'default',hitW:140,hitH:100,
-    props:{label:{l:'Reference'},value:{l:'Part'}},
+    props:{label:{l:'Reference'},value:{l:'Part'},vlim:{l:'Output limit ± (V)',def:'15'}},
     pins:[{x:-60,y:-20,n:'IN-'},{x:-60,y:20,n:'IN+'},{x:60,y:0,n:'OUT'}],
     draw(g,v){
       PY(g,'-40,-40 -40,40 40,0','comp-body');
