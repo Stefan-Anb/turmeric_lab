@@ -4,13 +4,13 @@
     {
       "name": "schematic",
       "runtimeExecutable": "python",
-      "runtimeArgs": [".claude/serve.py", "8765"],
+      "runtimeArgs": ["server/server.py", "8765"],
       "port": 8765
     },
     {
       "name": "schematic-alt",
       "runtimeExecutable": "python",
-      "runtimeArgs": [".claude/serve.py", "8766"],
+      "runtimeArgs": ["server/server.py", "8766"],
       "port": 8766
     },
     {

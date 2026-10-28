@@ -17,7 +17,7 @@
 
 [library]
 name = "TurmericLab Schematic Library"
-version = "1.4.2"   # Version der gesamten Bibliothek, bei jeder Aenderung erhoehen
+version = "1.4.4"   # Version der gesamten Bibliothek, bei jeder Aenderung erhoehen
 
 [[schematic]]
 file = "thermische_simulation.svg"
@@ -29,6 +29,24 @@ version = "1.0.0"
 file = "linearregler_op.svg"
 name = "Linearregler mit OP"
 description = "Linearregler mit Feedback über eine Operationsverstärkerschaltung."
+version = "1.0.0"
+
+[[schematic]]
+file = "abwärtswandler.svg"
+name = "Abwärtswandler (nicht synchron)"
+description = "Klassischer Abwärtswandler."
+version = "1.0.0"
+
+[[schematic]]
+file = "buck_synchron.svg"
+name = "Synchroner Abwärtswandler"
+description = "Synchroner Abwärtswandler."
+version = "1.0.0"
+
+[[schematic]]
+file = "gegentaktwandler.svg"
+name = "Gegentaktwandler."
+description = "Potentialgetrenntes Schaltnetzteil: Halbbrückengegentaktwandler."
 version = "1.0.0"
 
 [[schematic]]
@@ -59,4 +77,16 @@ version = "1.0.0"
 file = "param_rc_sweep.svg"
 name = "Parameter Sweep: RC Rise Time"
 description = "RC step response with the resistor as a decade-swept parameter Rv (1k..100k). Transient family of curves plus the 10-90% rise time measurement plotted over Rv (log x) in the Measurement Report."
+version = "1.0.0"
+
+[[schematic]]
+file = "ir2103_driver.svg"
+name = "IR2103 Driver"
+description = "Schematic of a half bridge driver with IR2103"
+version = "1.0.0"
+
+[[schematic]]
+file = "thyristor_rl-last.svg"
+name = "Thyristor + RL-Last"
+description = "Thyristorschaltung mit RL-Last"
 version = "1.0.0"

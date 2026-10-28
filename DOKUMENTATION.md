@@ -1,6 +1,6 @@
 # TurmericLab: Code-Review und technische Dokumentation
 
-> Stand: 2026-10-23. Diese Datei dokumentiert die Codebasis, die verwendeten
+> Stand: 2026-10-28. Diese Datei dokumentiert die Codebasis, die verwendeten
 > mathematisch-algorithmischen Prinzipien, gefundene Inkonsistenzen sowie
 > Konzepte für eine generische Netzlistengenerierung und die Einbindung von
 > NGSpice-WASM. Es werden in diesem Dokument **keine** Code-Änderungen
@@ -634,8 +634,9 @@ Vorteile:
 >   unsichtbar war.
 > - **Raw-Picker:** Vorbelegung erfolgt nur einmal pro Lauf (`simRawInit`).
 >   Abwählen aller Signale bleibt bestehen (kein automatisches Reselect).
-> - **Dev-Server:** `.claude/serve.py` (threaded, `Cache-Control: no-store`)
->   verhindert die Browser-Cache-Probleme des nackten `python -m http.server`.
+> - **Dev-Server:** `server/server.py` (threaded, `Cache-Control: no-store`)
+>   verhindert die Browser-Cache-Probleme des nackten `python -m http.server`
+>   (frueher `.claude/serve.py`, siehe Kapitel 9a).
 >
 > - **Engine:** `eecircuit-engine@1.7.0` (ngspice als WASM), lazy via
 >   dynamischem `import()` von `esm.sh` beim ersten Lauf.
@@ -1236,6 +1237,45 @@ version = "1.0.0"      # bei Aenderung dieses Schematics erhoehen
 Speicher (`origin={file,version}`); weicht die Version in der TOML spaeter ab,
 zeigt der Dialog "vX available". Die Bibliothek wird per `fetch()` geladen
 (also nicht ueber `file://`) und vom Deploy-Workflow mit veroeffentlicht.
+
+## 9a. Optionales lokales Backend (`server/server.py`)
+
+**Rein optional.** Die produktive Nutzung bleibt die statisch auf GitHub Pages
+gehostete Instanz; das Frontend darf nie von diesem Backend abhaengen. Das
+Backend ist fuer Entwickler mit Repo-Checkout gedacht: ein einheitlicher
+Test-/Dev-Server (ersetzt `.claude/serve.py`) plus Funktionen, die nur mit
+Schreibzugriff aufs Repo moeglich sind.
+
+- **Start:** `python server/server.py [port] [--host 127.0.0.1] [--root DIR]`
+  (PowerShell-Starter: `server/start-server.ps1 [-Port] [-BindHost] [-NoBrowser]`, oeffnet den Browser. Standard 8765, nur Loopback, da die API in `library/` schreibt). Reine
+  Python-Standardbibliothek. Statische Dateien mit `Cache-Control: no-store`.
+- **Erkennung im Frontend:** `detectBackend()` (js/app.js) ruft beim Oeffnen
+  des Library-Dialogs `api/status` ab. Auf Pages antwortet das mit 404, `backend`
+  bleibt `{available:false}` und die Zusatzfunktionen werden gar nicht gerendert.
+  Neue Backend-Features muessen sich auf dieselbe Weise ueber `api/status`
+  ankuendigen und duerfen ohne Backend nur fehlen, nie stoeren.
+- **`POST /api/library/save`** `{file,name,description,svg}`: schreibt
+  `library/<file>` und patcht `library/library.toml` textuell (Kommentare und
+  Formatierung bleiben erhalten): bestehender Block (Match ueber `file`) →
+  `name`/`description` ersetzt, Schematic-Version Patch +1; sonst neuer
+  `[[schematic]]`-Block mit `1.0.0`. Die Gesamtversion `[library] version` wird
+  immer Patch +1. Der SVG-Inhalt wird auf Wohlgeformtheit und `#schematic-data`
+  geprueft, Dateinamen duerfen nur ein `.svg` direkt in `library/` sein. Schreiben
+  erfolgt atomar (tmp + `os.replace`), erst die SVG, dann die TOML.
+- **Schutz:** POST nur mit lokalem `Host` (localhost/127.0.0.1/[::1]) und, falls
+  gesetzt, `Origin` == `Host` (gegen fremde Webseiten bzw. DNS-Rebinding).
+- **Frontend:** Button `TO GLOBAL` in der Zeile der **aktuell** geoeffneten Datei
+  im Schematic-Library-Dialog (nur mit Backend). `showSaveToGlobalDialog()`
+  zeigt Name (= interner Dateiname), editierbare Beschreibung und, falls ein
+  globales Schematic gleichen Namens (case-insensitiv) existiert, einen
+  Ueberschreib-Warnhinweis mit alter Datei/Version; der Dialog ist zugleich die
+  Bestaetigung. Neuer Dateiname: `globalFileForName()` (Kleinbuchstaben, Umlaute
+  bleiben, sonst `_`). Der SVG-Text kommt aus `buildSVGText()` (aus `exportSVG()`
+  herausgeloest, gemeinsam mit dem Download). Danach bekommt die interne Datei
+  `origin={file,version}` der neuen Version, damit kein falsches "vX available"
+  erscheint, und die globale Liste wird neu geladen.
+- **Hinweis:** Aenderungen landen nur im Arbeitsverzeichnis; Commit/Push bleibt
+  Sache des Entwicklers.
 
 ## 10. Leistungsanalysator PA-4
 

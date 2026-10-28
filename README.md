@@ -47,7 +47,7 @@ Webserver öffnen (nicht per Doppelklick/`file://`, da relative Skript-Pfade
 sonst nicht zuverlässig laden):
 
 ```bash
-python .claude/serve.py 8765
+python server/server.py 8765
 ```
 
 Anschließend `http://localhost:8765` im Browser öffnen.

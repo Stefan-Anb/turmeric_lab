@@ -414,6 +414,16 @@ body{font-family:'Rajdhani',sans-serif;font-size:13px;color:var(--text-hi);displ
 .lib-actions{display:flex;gap:6px;flex:none;}
 .lib-btn{height:24px;padding:0 8px;font-size:11px;}
 .lib-btn-danger:hover{color:#ff5f5f;border-color:#ff5f5f;background:#ff5f5f18;}
+.sg-body{padding:14px 16px;display:flex;flex-direction:column;gap:12px;overflow-y:auto;}
+.sg-field label{display:block;font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--text-lo);margin-bottom:3px;}
+.sg-name{font-size:13px;font-weight:600;color:var(--text-hi);}
+.sg-desc{width:100%;box-sizing:border-box;resize:vertical;background:var(--bg-deep);border:1px solid var(--border);border-radius:3px;color:var(--text-hi);font-family:'Share Tech Mono',monospace;font-size:12px;padding:6px;outline:none;}
+.sg-desc:focus{border-color:var(--accent);}
+.sg-warn{font-size:12px;color:#ff9f43;border:1px solid #ff9f43;background:#ff9f4318;border-radius:3px;padding:8px 10px;}
+.sg-info{font-size:12px;color:var(--text-mid);}
+.sg-err{font-size:12px;color:#ff5f5f;}
+.sg-err:empty{display:none;}
+.dialog-footer .lib-btn-danger{border-color:#ff9f43;color:#ff9f43;}
 .lib-empty{font-size:12px;color:var(--text-lo);padding:8px 2px;}
 .lib-error{color:#ff5f5f;}
 

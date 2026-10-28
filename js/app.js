@@ -2385,6 +2385,12 @@ function applyState(state,opts){
 // file that is temporarily swapped in, see downloadInternalFile()).
 function exportSVG(opts){
   opts=opts||{};
+  downloadBlob(new Blob([buildSVGText(opts)],{type:'image/svg+xml'}),(opts.filename||currentFileName()||'schematic')+'.svg');
+}
+// Serialises the live canvas (+ embedded state) to SVG text; shared by the
+// download and by "save to global library" (optional backend, see below).
+function buildSVGText(opts){
+  opts=opts||{};
   var clone=svg.cloneNode(true);
   // remove interactive/overlay elements
   var overlay=clone.querySelector('#lyr-overlay');
@@ -2452,7 +2458,7 @@ function exportSVG(opts){
   // XMLSerializer, not outerHTML: the HTML-style serialization writes void
   // elements bare (a Note's blank line becomes `<br>` inside its foreignObject),
   // which makes the file ill-formed XML and breaks importSVG()'s DOMParser.
-  downloadBlob(new Blob([new XMLSerializer().serializeToString(clone)],{type:'image/svg+xml'}),(opts.filename||currentFileName()||'schematic')+'.svg');
+  return new XMLSerializer().serializeToString(clone);
 }
 function downloadBlob(blob,filename){
   var a=document.createElement('a');
@@ -3355,6 +3361,101 @@ function downloadGlobalSchematic(entry){
     .catch(function(e){alert('Could not download "'+entry.file+'": '+(e.message||e));});
 }
 
+// ── Optional local backend (server/server.py) ──
+// Purely additive: on the static GitHub Pages build /api/status 404s, `backend`
+// stays unavailable and the buttons below are simply not rendered.
+var backend={available:false,librarySave:false};
+function detectBackend(){
+  return fetch('api/status',{cache:'no-store'})
+    .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
+    .then(function(j){backend.available=!!(j&&j.backend);backend.librarySave=backend.available&&!!j.librarySave;})
+    .catch(function(){backend.available=false;backend.librarySave=false;});
+}
+
+// File name for a new global entry: lowercase, unsafe characters -> "_"
+// (umlauts stay, like in the existing library files).
+function globalFileForName(name){
+  var base=name.trim().toLowerCase().replace(/[^a-z0-9äöüß_-]+/g,'_').replace(/^_+|_+$/g,'')||'schematic';
+  var file=base+'.svg',n=2;
+  while(globalLibrary.entries.some(function(e){return e.file.toLowerCase()===file;}))file=base+'_'+(n++)+'.svg';
+  return file;
+}
+function findGlobalByName(name){
+  var key=name.trim().toLowerCase();
+  return globalLibrary.entries.filter(function(e){return e.name.trim().toLowerCase()===key;})[0]||null;
+}
+function bumpPatch(v){
+  var m=/^(\d+)\.(\d+)\.(\d+)$/.exec(v||'');
+  return m?m[1]+'.'+m[2]+'.'+(+m[3]+1):'1.0.0';
+}
+
+// Dialog doubles as the overwrite confirmation (warning shown when a global
+// entry with the same name exists). Only for the schematic currently open.
+function showSaveToGlobalDialog(){
+  if(document.getElementById('save-global-overlay'))return;
+  var name=currentFileName();
+  var existing=findGlobalByName(name);
+  var ov=libEl('div','dialog-overlay');ov.id='save-global-overlay';
+  var dlg=libEl('div','dialog');dlg.style.width='460px';
+  dlg.appendChild(libEl('div','dialog-header','Save to global library'));
+  var body=libEl('div','sg-body');
+  var nameRow=libEl('div','sg-field');
+  nameRow.appendChild(libEl('label',null,'Name'));
+  nameRow.appendChild(libEl('div','sg-name',name));
+  body.appendChild(nameRow);
+  var descRow=libEl('div','sg-field');
+  descRow.appendChild(libEl('label',null,'Description'));
+  var ta=libEl('textarea','sg-desc');
+  ta.rows=3;ta.value=existing?existing.description:'';
+  descRow.appendChild(ta);
+  body.appendChild(descRow);
+  var warn=libEl('div',existing?'sg-warn':'sg-info');
+  if(existing)warn.textContent='Warning: the global schematic "'+existing.name+'" ('+existing.file+', v'+existing.version+') will be overwritten with the current schematic and cannot be restored from the app (git can). New version: v'+bumpPatch(existing.version)+'.';
+  else warn.textContent='No global schematic with this name exists yet. A new entry ('+globalFileForName(name)+', v1.0.0) will be created in library/.';
+  body.appendChild(warn);
+  var err=libEl('div','sg-err');body.appendChild(err);
+  dlg.appendChild(body);
+  var foot=libEl('div','dialog-footer');
+  var cancel=libEl('button','tb-btn','CANCEL');
+  var ok=libEl('button','tb-btn lib-btn-danger',existing?'OVERWRITE':'SAVE');
+  if(!existing)ok.className='tb-btn';
+  foot.appendChild(cancel);foot.appendChild(ok);
+  dlg.appendChild(foot);
+  ov.appendChild(dlg);
+  function close(){ov.remove();document.removeEventListener('keydown',onKey,true);}
+  function onKey(e){if(e.key==='Escape'){e.stopPropagation();close();}}
+  document.addEventListener('keydown',onKey,true);
+  ov.addEventListener('click',function(e){if(e.target===ov)close();});
+  cancel.onclick=close;
+  ok.onclick=function(){
+    ok.disabled=true;err.textContent='';
+    saveCurrentToGlobal(existing,name,ta.value).then(close).catch(function(e){
+      ok.disabled=false;err.textContent='Could not save: '+(e.message||e);
+    });
+  };
+  document.body.appendChild(ov);
+  ta.focus();
+}
+function saveCurrentToGlobal(existing,name,description){
+  saveSchematic();
+  var file=existing?existing.file:globalFileForName(name);
+  return fetch('api/library/save',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({file:file,name:name,description:description.trim(),svg:buildSVGText({filename:name})})
+  }).then(function(r){
+    return r.json().catch(function(){return {};}).then(function(j){
+      if(!r.ok||!j.ok)throw new Error(j.error||'HTTP '+r.status);
+      return j;
+    });
+  }).then(function(j){
+    // the internal copy now matches the global one: no "update available" badge
+    var f=currentFileId&&findFileEntry(currentFileId);
+    if(f){f.origin={file:j.file,version:j.version};saveFileIndex();}
+    hint('Saved to global library: '+j.file+' v'+j.version);
+    return loadGlobalLibrary();
+  });
+}
+
 // Switches the editor to an already stored file (caller flushes the old one).
 function switchToFile(id){
   var state=readFileState(id);
@@ -3418,6 +3519,7 @@ function showLibrary(){
   modal.style.display='flex';
   modal.onclick=function(e){if(e.target===modal)closeLibrary();};
   renderLibrary();
+  detectBackend().then(renderLibrary);
   loadGlobalLibrary();
 }
 function closeLibrary(){
@@ -3496,6 +3598,7 @@ function renderLibrary(){
     act.appendChild(libBtn('OPEN',isCur?'This schematic is already open':'Open this schematic',function(){openInternalFile(f.id);}));
     act.appendChild(libBtn('RENAME','Rename (internal name only)',function(){libRenamingId=f.id;renderLibrary();}));
     act.appendChild(libBtn('DOWNLOAD','Download as SVG',function(){downloadInternalFile(f.id);}));
+    if(isCur&&backend.librarySave)act.appendChild(libBtn('TO GLOBAL','Save to the global library in the project (local backend). Replaces a global schematic with the same name.',showSaveToGlobalDialog));
     act.appendChild(libBtn('DELETE','Delete from browser storage',function(){deleteInternalFile(f.id);renderLibrary();},'lib-btn-danger'));
     row.appendChild(act);
     sec.appendChild(row);

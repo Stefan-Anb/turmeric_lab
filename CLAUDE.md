@@ -56,6 +56,7 @@ js/version.js → js/components.js → js/schematic.js → js/netlist.js → js/
 | `js/power-analyzer-ui.js` | Leistungsanalysator: Dialog, portabel (nur Core + Datenquellen-Interface) |
 | `js/power-analyzer-sim.js` | Leistungsanalysator: Anbindung an Simulation/Probes (TurmericLab-Glue) |
 | `js/power-analyzer-worker.js` | Leistungsanalysator: Web Worker für große Datensätze (nicht per `<script>` geladen) |
+| `server/server.py` | **Optionales** lokales Backend (Dev-Server + API, siehe unten), nicht Teil der ausgelieferten App; `server/start-server.ps1` startet es unter Windows |
 | `css/styles.css` | Styling (`css/power-analyzer.css` für den Analysator) |
 
 Globaler Zustand statt Module/Klassen: `S` (Schaltplandaten), `CD`
@@ -67,11 +68,26 @@ einer anderen Datei als globaler Bezeichner erwartet wird.
 
 Kein Build nötig, aber **nicht per `file://` öffnen** — relative `<script
 src>`-Pfade und manche Fetches funktionieren dann nicht zuverlässig. Stattdessen
-den vorhandenen Dev-Server nutzen (cache-frei, `.claude/serve.py`):
+den Dev-Server nutzen (cache-frei, `server/server.py`):
 
 ```bash
-python .claude/serve.py 8765
+python server/server.py 8765
 ```
+
+Unter Windows alternativ `.\server\start-server.ps1` (optional `-Port`, `-NoBrowser`).
+
+### Optionales Backend (`server/server.py`)
+
+**Das Backend ist rein optional.** Die primäre Nutzung bleibt die rein statisch
+auf GitHub Pages gehostete Instanz. Das Frontend darf daher **niemals** von
+`/api/...` abhängen: Features, die das Backend brauchen, erkennen es zur Laufzeit
+über `api/status` und werden ohne Backend schlicht nicht angezeigt. Keine
+notwendige Funktion darf nur mit Backend laufen.
+
+Zweck: einheitlicher Dev-/Test-Server für Entwickler und Funktionen, die
+Schreibzugriff aufs Repo brauchen. Aktuell: Speichern des geöffneten Schematics
+in die globale Bibliothek (`library/`, Button `TO GLOBAL` im Schematic-Library-
+Dialog). Details in DOKUMENTATION.md Kapitel 9a.
 
 oder über die Preview-Tooling-Konfiguration `.claude/launch.json` (Eintrag
 `"schematic"`, Port 8765). Automatisierte Tests gibt es nur für den Analysator-Kern
