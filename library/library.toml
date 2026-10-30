@@ -17,7 +17,7 @@
 
 [library]
 name = "TurmericLab Schematic Library"
-version = "1.4.6"   # Version der gesamten Bibliothek, bei jeder Aenderung erhoehen
+version = "1.4.7"   # Version der gesamten Bibliothek, bei jeder Aenderung erhoehen
 
 [[schematic]]
 file = "thermische_simulation.svg"
@@ -89,4 +89,10 @@ version = "1.0.0"
 file = "thyristor_rl-last.svg"
 name = "Thyristor + RL-Last"
 description = "Thyristorschaltung mit RL-Last"
+version = "1.0.0"
+
+[[schematic]]
+file = "boostconverter.svg"
+name = "Boostconverter"
+description = "Boostconverter"
 version = "1.0.0"
