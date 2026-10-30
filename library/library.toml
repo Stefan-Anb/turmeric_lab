@@ -17,7 +17,7 @@
 
 [library]
 name = "TurmericLab Schematic Library"
-version = "1.4.7"   # Version der gesamten Bibliothek, bei jeder Aenderung erhoehen
+version = "1.4.9"   # Version der gesamten Bibliothek, bei jeder Aenderung erhoehen
 
 [[schematic]]
 file = "thermische_simulation.svg"
@@ -47,7 +47,7 @@ version = "1.0.0"
 file = "gegentaktwandler.svg"
 name = "Gegentaktwandler."
 description = "Potentialgetrenntes Schaltnetzteil: Halbbrückengegentaktwandler."
-version = "1.0.1"
+version = "1.0.3"
 
 [[schematic]]
 file = "rc_lowpass.svg"           # Dateiname relativ zu library/

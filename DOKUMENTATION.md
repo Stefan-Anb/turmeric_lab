@@ -1,6 +1,6 @@
 # TurmericLab: Code-Review und technische Dokumentation
 
-> Stand: 2026-10-28. Diese Datei dokumentiert die Codebasis, die verwendeten
+> Stand: 2026-10-30. Diese Datei dokumentiert die Codebasis, die verwendeten
 > mathematisch-algorithmischen Prinzipien, gefundene Inkonsistenzen sowie
 > Konzepte für eine generische Netzlistengenerierung und die Einbindung von
 > NGSpice-WASM. Es werden in diesem Dokument **keine** Code-Änderungen
@@ -384,6 +384,8 @@ Teil der Bibliothek.
 ("Serienwiderstand"). Ist es ungleich 0, emittiert `generateNetlist()` statt
 `C1 a b val` die Kette `C1 a n_C1_esr val` und `RC1_esr n_C1_esr b esr`; der
 Bauteilstrom `@C1[i]` bleibt der Strom durch beide.
+
+**Transformator (`transformer`).** Zwei gekoppelte Induktivitäten plus K-Statement: `L<ref>P` (Primär-L = `value`), `L<ref>S` und `K<ref> L<ref>P L<ref>S k`. Das Übersetzungsverhältnis ist `u = Npri/Nsec` (Dezimalpunkt, kein Komma; auch Parameternamen sind erlaubt). Die Sekundärinduktivität wird als SPICE-Ausdruck `{Lp/(u*u)}` emittiert; Leerlaufspannung `Usec = Upri/u`. `u = 2` teilt die Spannung also durch 2, `u = 0.5` verdoppelt sie. Bis 2026-10-30 war es umgekehrt definiert (`u = Nsec/Npri`, `Ls = Lp*u²`); in älteren gespeicherten Schaltungen mit `u ≠ 1` kehrt sich die Wirkung dadurch um. Stolperstein: mit dem Standardwert `k = 1` ist die Kopplungsmatrix exakt singulär; in der Schaltung "Gegentaktwandler" brach die Simulation bei `u = 1.2` damit ab, mit `k = 0.999` lief sie.
 
 ### 3.2 Konkrete Fehler in der Netzlistengenerierung
 

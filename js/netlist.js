@@ -936,7 +936,7 @@ function generateNetlist(opts){
     }
     if(c.type==='transformer'){
       // Two coupled inductors, not a subcircuit: a primary L, a secondary L
-      // whose value is derived as {Lprimary*u^2} (u = turns ratio, so it
+      // whose value is derived as {Lprimary/u^2} (u = Npri/Nsec, so it
       // keeps working symbolically if either value references a .param),
       // and a K statement carrying the coupling factor between them.
       var traf=transformerRef(c);
@@ -949,7 +949,7 @@ function generateNetlist(opts){
       var uRatio=(c.u!=null&&c.u!=='')?c.u:'1';
       var kCoup=(c.k!=null&&c.k!=='')?c.k:'1';
       lines.push('L'+traf+'P '+tNets[0]+' '+tNets[1]+' '+lp);
-      lines.push('L'+traf+'S '+tNets[2]+' '+tNets[3]+' {('+stripBraces(lp)+')*('+stripBraces(uRatio)+')*('+stripBraces(uRatio)+')}');
+      lines.push('L'+traf+'S '+tNets[2]+' '+tNets[3]+' {('+stripBraces(lp)+')/(('+stripBraces(uRatio)+')*('+stripBraces(uRatio)+'))}');
       lines.push('K'+traf+' L'+traf+'P L'+traf+'S '+kCoup);
       continue;
     }

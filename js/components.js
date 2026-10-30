@@ -421,7 +421,7 @@ const CD={
   // Ideal transformer, modeled the standard SPICE way as two coupled
   // inductors: a primary L, a secondary L, and a K (mutual coupling)
   // statement between them (see generateNetlist()'s 'transformer' branch).
-  // Secondary inductance is derived from primary*u^2 (u = turns ratio) as a
+  // Secondary inductance is derived from primary/u^2 (u = Npri/Nsec) as a
   // SPICE {…} expression, not computed numerically here, so it keeps working
   // even when the primary value or u reference a .param.
   transformer:{
@@ -429,7 +429,7 @@ const CD={
     props:{
       label:{l:'Reference'},
       value:{l:'Primary L',def:'1m'},
-      u:{l:'Turns ratio (u)',def:'1'},
+      u:{l:'Turns ratio (u = Npri/Nsec)',def:'1'},
       k:{l:'Coupling (k)',def:'1'}
     },
     pins:[{x:-60,y:-40,n:'P1'},{x:-60,y:40,n:'P2'},{x:60,y:-40,n:'S1'},{x:60,y:40,n:'S2'}],
