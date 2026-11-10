@@ -609,8 +609,25 @@ function comparatorSubckt(name,c){
   ];
 }
 
+// Isolation amplifier: V(OUT,GND_ISO) = gain * V(IN). IN is referenced to real
+// ground (node 0), the output pair floats: GND_ISO can sit at any potential.
+// The 1 G resistor from GND_ISO to ground is only there so a floating output
+// side never makes the matrix singular (same role as the 1 G on the inputs).
+function isoAmpSubckt(name,c){
+  var g=String(c.iso_gain==null||String(c.iso_gain).trim()===''?'1':c.iso_gain).trim();
+  return [
+    '* Isolation amplifier ('+name+'): gain '+g,
+    '.subckt '+name+' IN OUT COM',
+    'Rin IN 0 1G',
+    'Riso COM 0 1G',
+    "B1 OUT COM V='("+g+")*v(IN)'",
+    '.ends '+name
+  ];
+}
+
 var MC_SUBCKT={indmotor:inductionMotorSubckt,clarke:clarkeSubckt,park:parkSubckt,svm:svmSubckt,
-  pi:piSubckt,integrator:integratorSubckt,mathblk:mathBlockSubckt,comparator:comparatorSubckt};
+  pi:piSubckt,integrator:integratorSubckt,mathblk:mathBlockSubckt,comparator:comparatorSubckt,
+  isoamp:isoAmpSubckt};
 
 // ═══ MODEL SELECTION ═══
 // Symbols carry a part number for documentation (2N2222, 1N4148, RED …), but a

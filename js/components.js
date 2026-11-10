@@ -762,6 +762,28 @@ const CD={
       T(g,0,-46,v.label||'CMP','comp-label');
     }
   },
+  isoamp:{
+    // Isolation amplifier: V(OUT)-V(GND_ISO) = gain * V(IN). IN is referenced to
+    // real ground (node 0); the output side floats on GND_ISO.
+    // See isoAmpSubckt() in js/netlist.js.
+    lbl:'ISO',val:'',hitW:140,hitH:100,
+    props:{
+      label:{l:'Reference'},
+      iso_gain:{l:'Gain',def:'1'}
+    },
+    pins:[{x:-60,y:0,n:'IN'},{x:60,y:-20,n:'OUT'},{x:60,y:20,n:'GND_ISO'}],
+    draw(g,v){
+      R(g,-40,-40,80,80,'comp-body');
+      L(g,-60,0,-40,0,'comp-pin');L(g,40,-20,60,-20,'comp-pin');L(g,40,20,60,20,'comp-pin');
+      // dashed isolation barrier
+      var sep=LE(g,0,-40,0,40,'comp-pin');sep.style.strokeDasharray='4 4';sep.style.opacity='.45';
+      var t=TA(g,-20,4,'▷','comp-label');t.style.fontSize='18px';
+      var k=TA(g,20,4,'×'+(v.iso_gain||'1'),'comp-label');k.style.fontSize='11px';
+      var n1=TA(g,32,-16,'OUT','comp-label');n1.style.fontSize='9px';n1.setAttribute('text-anchor','end');
+      var n2=TA(g,32,24,'ISO','comp-label');n2.style.fontSize='9px';n2.setAttribute('text-anchor','end');
+      T(g,0,-52,v.label||'ISO','comp-label');
+    }
+  },
   npn:{
     lbl:'Q',val:'default',hitW:100,hitH:100,
     props:{label:{l:'Reference'},value:{l:'Part'}},

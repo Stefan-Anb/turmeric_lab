@@ -236,6 +236,7 @@ zunächst feste Modellkarten und durchläuft dann `S.components` in einer große
 | scr *(neu 2026-08-14)* | `X<label> nA nG nK scr_<ref>` + verhaltensbasierter `.subckt` | `Xxxx nodes subckt` | ok; Latch-Modell, siehe 3.4 |
 | pwmgen *(neu 2026-08-14)* | `X<label> IN OUTH COMH OUTL COML pwmgen_<ref>` + `.subckt` | `Xxxx nodes subckt` | ok; B-Source-Modell, siehe 3.4 |
 | comparator *(neu 2026-11-10)* | `X<label> IN- IN+ OUT comparator_<ref>` + `.subckt` pro Instanz | `Xxxx nodes subckt` | ok; B-Source-Modell, siehe 3.4 |
+| isoamp *(neu 2026-11-10)* | `X<label> IN OUT GND_ISO isoamp_<ref>` + `.subckt` pro Instanz | `Xxxx nodes subckt` | ok; B-Source-Modell, siehe 3.4 |
 | indmotor / clarke / park / svm / pi / integrator / mathblk *(Motor Control)* | `X<label> <Pins in CD-Reihenfolge> <typ>_<ref>` + `.subckt` | `Xxxx nodes subckt` | ok; B-Source-Modelle, siehe 3.5 |
 
 **Quellen-Properties (`CD.source`).** `meas` (V/I) schaltet im Properties-Panel die Beschriftungen um ("(V)" wird "(A)", "Voltage" wird "Current", `Vinitial`/`Von` werden `Iinitial`/`Ion`), siehe `renderProps()` in `js/app.js`. Props können neben `modes` auch `meas:['I']` tragen und erscheinen dann nur bei dieser Messgröße (genutzt für `load`). Die SPICE-Präfixe stehen in `buildSpiceRefMap()`; `B` kommt nur beim Load-Modus vor und wird bei der `.save`-Liste wie `I`/`G` behandelt (`@ref[i]`).
@@ -323,6 +324,17 @@ Eingänge haben 1 G nach Masse. Der unverdrahtete-Pin-Knoten im generischen
 `MC_SUBCKT`-Zweig wird jetzt bereinigt (`+` wird `p`, `-` wird `n`, sonstige Sonderzeichen entfallen),
 weil `IN+`/`IN-` sonst Sonderzeichen im Knotennamen lieferten bzw. beide offenen
 Eingänge auf denselben Knoten `nc_<ref>_in` fielen.
+
+**Isolationsverstärker (`isoamp`, neu 2026-11-10).** Pins `IN`, `OUT`, `GND_ISO`
+(Palette "ICs / Other"), Property `iso_gain` ("Gain", Default 1, leer = 1,
+Parameternamen/Ausdrücke erlaubt). `isoAmpSubckt()` in `js/netlist.js` (Teil von
+`MC_SUBCKT`): `B1 OUT COM V='gain*v(IN)'`. `IN` ist wie beim PWM-Generator auf
+echtes Massepotential (Knoten 0) bezogen, die Ausgangsseite schwimmt: es gilt
+V(OUT) − V(GND_ISO) = Gain·V(IN), `GND_ISO` kann auf beliebigem Potential liegen.
+`Rin IN 0 1G` und `Riso COM 0 1G` verhindern schwebende Knoten bzw. eine singuläre
+Matrix, wenn `GND_ISO` unverdrahtet ist (das entspricht einem Isolationswiderstand
+von 1 GΩ). Kein Ausgangswiderstand, keine Bandbreite, keine Begrenzung. Unverdrahtete
+Pins bekommen den Knoten `nc_<ref>_<pin>` (`GND_ISO` → `gndiso`).
 
 Die 3-Pin-VDMOS-Form ist laut Manual gültig ("the fourth node of the vdmos
 instance can be removed"), siehe Quellen unten. Die NPN/PNP-Reihenfolge
