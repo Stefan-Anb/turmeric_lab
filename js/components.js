@@ -743,6 +743,25 @@ const CD={
       T(g,0,-52,v.label||'FN','comp-label');
     }
   },
+  comparator:{
+    // Simple ideal comparator: OUT = Vhigh when V(IN+) > V(IN-), else Vlow.
+    // Behavioural subcircuit, see comparatorSubckt() in js/netlist.js.
+    lbl:'CMP',val:'',hitW:140,hitH:100,
+    props:{
+      label:{l:'Reference'},
+      cmp_vhigh:{l:'Output high (V)',def:'1'},
+      cmp_vlow:{l:'Output low (V)',def:'0'}
+    },
+    pins:[{x:-60,y:-20,n:'IN-'},{x:-60,y:20,n:'IN+'},{x:60,y:0,n:'OUT'}],
+    draw(g,v){
+      PY(g,'-40,-40 -40,40 40,0','comp-body');
+      L(g,-60,-20,-40,-20,'comp-pin');L(g,-60,20,-40,20,'comp-pin');L(g,40,0,60,0,'comp-pin');
+      TA(g,-28,-20,'−','comp-label');TA(g,-28,20,'+','comp-label');
+      // step icon: low level, then high level
+      PE(g,'M-14,6 L-4,6 L-4,-6 L8,-6','comp-body').style.fill='none';
+      T(g,0,-46,v.label||'CMP','comp-label');
+    }
+  },
   npn:{
     lbl:'Q',val:'default',hitW:100,hitH:100,
     props:{label:{l:'Reference'},value:{l:'Part'}},

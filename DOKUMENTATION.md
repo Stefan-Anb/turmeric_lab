@@ -1,6 +1,6 @@
 # TurmericLab: Code-Review und technische Dokumentation
 
-> Stand: 2026-10-30. Diese Datei dokumentiert die Codebasis, die verwendeten
+> Stand: 2026-11-10. Diese Datei dokumentiert die Codebasis, die verwendeten
 > mathematisch-algorithmischen Prinzipien, gefundene Inkonsistenzen sowie
 > Konzepte für eine generische Netzlistengenerierung und die Einbindung von
 > NGSpice-WASM. Es werden in diesem Dokument **keine** Code-Änderungen
@@ -164,7 +164,13 @@ komplett neu aufgebaut. Pipeline:
    wenn er Junction ist, Grad != 2 hat, oder auf einem Pin liegt. Zwischen zwei
    Breaks entsteht eine neue Wire.
 8. **Neuverdrahtung:** Endpunkte werden wieder an Pins/Junctions gebunden, der
-   Netzname (falls vorhanden) wird übernommen.
+   Netzname (falls vorhanden) wird übernommen. Ebenso das Flag `showLabel`
+   ("Show label on this segment"): vor dem Löschen wird je beschriftetem Wire
+   ein Segmentmittelpunkt gemerkt, die erste neue Wire, die diesen Punkt
+   enthält, bekommt das Flag zurück. *(Bugfix 2026-11-10: das Flag ging vorher
+   bei jedem Verschieben eines Blocks verloren, weil die Wire-Objekte ersetzt
+   werden und nur `net`/`color`/`width` übernommen wurden. Neue Wire-Felder
+   müssen hier immer mit übernommen werden.)*
 
 Das ist im Kern eine **Kantenkontraktion plus Graphzerlegung in maximale Pfade**
 über Knotengrade. Korrekt, aber teuer: mehrere geschachtelte Schleifen, im
@@ -229,6 +235,7 @@ zunächst feste Modellkarten und durchläuft dann `S.components` in einer große
 | zener *(neu 2026-08-14)* | `D<label> nA nK zm_<ref>` + eigene `.model … D(BV=…)` | `Dxxx n+ n- model` | ok; Durchbruchspannung je Instanz |
 | scr *(neu 2026-08-14)* | `X<label> nA nG nK scr_<ref>` + verhaltensbasierter `.subckt` | `Xxxx nodes subckt` | ok; Latch-Modell, siehe 3.4 |
 | pwmgen *(neu 2026-08-14)* | `X<label> IN OUTH COMH OUTL COML pwmgen_<ref>` + `.subckt` | `Xxxx nodes subckt` | ok; B-Source-Modell, siehe 3.4 |
+| comparator *(neu 2026-11-10)* | `X<label> IN- IN+ OUT comparator_<ref>` + `.subckt` pro Instanz | `Xxxx nodes subckt` | ok; B-Source-Modell, siehe 3.4 |
 | indmotor / clarke / park / svm / pi / integrator / mathblk *(Motor Control)* | `X<label> <Pins in CD-Reihenfolge> <typ>_<ref>` + `.subckt` | `Xxxx nodes subckt` | ok; B-Source-Modelle, siehe 3.5 |
 
 **Quellen-Properties (`CD.source`).** `meas` (V/I) schaltet im Properties-Panel die Beschriftungen um ("(V)" wird "(A)", "Voltage" wird "Current", `Vinitial`/`Von` werden `Iinitial`/`Ion`), siehe `renderProps()` in `js/app.js`. Props können neben `modes` auch `meas:['I']` tragen und erscheinen dann nur bei dieser Messgröße (genutzt für `load`). Die SPICE-Präfixe stehen in `buildSpiceRefMap()`; `B` kommt nur beim Load-Modus vor und wird bei der `.save`-Liste wie `I`/`G` behandelt (`@ref[i]`).
@@ -302,6 +309,20 @@ unverdrahteter Pin bekommt wie bei den Motor-Control-Blöcken einen eigenen Knot
 anbindbar. Probebar ist der Ausgangsstrom über `i(b.x<ref>.b1)`; die Eingänge
 nehmen im Idealfall keinen Strom auf und sind nicht probebar. Verifiziert (`.op`):
 Spannungsfolger an 1 V liefert 1 V bei `vlim`=15 und 0,5 V bei `vlim`=0,5.
+
+**Komparator (`comparator`, neu 2026-11-10).** Einfacher idealer Komparator mit
+Pins `IN-`, `IN+`, `OUT` (Palette "ICs / Other"). Properties `cmp_vhigh` ("Output
+high (V)", Default 1) und `cmp_vlow` ("Output low (V)", Default 0); leer fällt auf
+den Default zurück, Parameternamen/Ausdrücke sind erlaubt. `comparatorSubckt()`
+in `js/netlist.js` (Teil von `MC_SUBCKT`, also ein `.subckt comparator_<ref>` pro
+Instanz): `B1 OUT 0 V='vl+(vh-vl)*0.5*(1+tanh(1e4*(v(INP)-v(INN))))'`. Ausgang =
+High für IN+ > IN-, sonst Low. Der Übergang ist wie beim Opamp ein glattes
+`tanh()` (Flankenbreite ca. 0,1 mV) statt eines `?:`-Sprungs, damit der Solver
+nicht stolpert. Kein Ausgangswiderstand, keine Hysterese, keine Verzögerung.
+Eingänge haben 1 G nach Masse. Der unverdrahtete-Pin-Knoten im generischen
+`MC_SUBCKT`-Zweig wird jetzt bereinigt (`+` wird `p`, `-` wird `n`, sonstige Sonderzeichen entfallen),
+weil `IN+`/`IN-` sonst Sonderzeichen im Knotennamen lieferten bzw. beide offenen
+Eingänge auf denselben Knoten `nc_<ref>_in` fielen.
 
 Die 3-Pin-VDMOS-Form ist laut Manual gültig ("the fourth node of the vdmos
 instance can be removed"), siehe Quellen unten. Die NPN/PNP-Reihenfolge

@@ -592,8 +592,25 @@ function opampSubckt(name,c){
   ];
 }
 
+// Simple comparator: OUT = Vlow + (Vhigh-Vlow)*(1+tanh(k*(V(INP)-V(INN))))/2.
+// Smooth transition (a hard ?: step would upset the solver, same reason as in
+// the op-amp); k = 1e4 gives a ~0.1 mV wide edge. Levels are inlined as
+// literals/expressions (also .param names), one subcircuit per instance.
+function comparatorSubckt(name,c){
+  var vh=String(c.cmp_vhigh==null||String(c.cmp_vhigh).trim()===''?'1':c.cmp_vhigh).trim();
+  var vl=String(c.cmp_vlow==null||String(c.cmp_vlow).trim()===''?'0':c.cmp_vlow).trim();
+  return [
+    '* Comparator ('+name+'): OUT = '+vh+' for IN+ > IN-, else '+vl,
+    '.subckt '+name+' INN INP OUT',
+    'Rin INP INN 1e12',
+    'Rl1 INN 0 1G','Rl2 INP 0 1G',
+    "B1 OUT 0 V='("+vl+")+(("+vh+")-("+vl+"))*0.5*(1+tanh(1e4*(v(INP)-v(INN))))'",
+    '.ends '+name
+  ];
+}
+
 var MC_SUBCKT={indmotor:inductionMotorSubckt,clarke:clarkeSubckt,park:parkSubckt,svm:svmSubckt,
-  pi:piSubckt,integrator:integratorSubckt,mathblk:mathBlockSubckt};
+  pi:piSubckt,integrator:integratorSubckt,mathblk:mathBlockSubckt,comparator:comparatorSubckt};
 
 // ═══ MODEL SELECTION ═══
 // Symbols carry a part number for documentation (2N2222, 1N4148, RED …), but a
@@ -1142,7 +1159,7 @@ function generateNetlist(opts){
         var nn=getNetNameWithTempNames(c.x+tp.x,c.y+tp.y);
         // an unwired pin resolves to the shared fallback "n000" — give it its own
         // node so two open outputs never end up shorted together
-        if(nn==='n000')nn='nc_'+ref.toLowerCase()+'_'+def.pins[pi].n.toLowerCase();
+        if(nn==='n000')nn='nc_'+ref.toLowerCase()+'_'+def.pins[pi].n.toLowerCase().replace(/\+/g,'p').replace(/-/g,'n').replace(/[^a-z0-9]/g,'');
         nets.push(nn);
       }
       lines.push(ref+' '+nets.join(' ')+' '+subname);
